@@ -221,6 +221,20 @@ app.put("/assignmanager/:branchId", async (req, res) => {
 });
 
 // Get Branches
+app.get("/branch-by-manager/:managerId", async (req, res) => {
+  const { managerId } = req.params;
+
+  try {
+    const branch = await BranchModel.findOne({ manager: managerId });
+    if (!branch) {
+      return res.status(404).json({ error: "No branch assigned to this manager" });
+    }
+    res.json(branch);
+  } catch (err) {
+    console.error("Error fetching branch by manager:", err.message);
+    res.status(500).json({ error: "Error fetching branch details" });
+  }
+});
 app.get("/branches", async (req, res) => {
   try {
     const branches = await BranchModel.find().populate("manager", "name phone");
@@ -331,56 +345,62 @@ app.get("/productlist", async (req, res) => {
   const { search, branchManagerId } = req.query;
 
   // console.log("Received request with branchManagerId:", branchManagerId); // Log the branchManagerId
-
   // Validate branchManagerId
   if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
-    console.error("Invalid or missing branch manager ID:", branchManagerId);
-    return res.status(400).json({ message: "Invalid or missing branch manager ID." });
-  }
+  console.error("Invalid or missing branch manager ID:", branchManagerId);
+  return res.status(400).json({ message: "Invalid or missing branch manager ID." });
+}
 
   try {
     // Convert branchManagerId to ObjectId
-    const objectIdBranchManagerId = new mongoose.Types.ObjectId(branchManagerId);
-
+const objectIdBranchManagerId = new mongoose.Types.ObjectId(branchManagerId);
     const products = await ProductModel.aggregate([
-      {
-        $match: {
-          branchManagerId: objectIdBranchManagerId,
-          $or: [
-            { name: { $regex: search || "", $options: 'i' } },
-            { productno: { $regex: search || "", $options: 'i' } }
-          ]
-        }
-      },
-      {
-        $group: {
-          _id: "$category",
-          products: {
-            $push: {
-              _id: "$_id",
-              productno: "$productno",
-              name: "$name",
-              purchaseprice: "$purchaseprice",
-              saleprice: "$saleprice",
-              quantity: "$quantity",
-              description: "$description",
-              quantityType: "$quantityType",
-              status: "$status"
-            }
-          }
+       {
+    $match: {
+      branchManagerId: objectIdBranchManagerId,
+      $or: [
+        { name: { $regex: search || "", $options: 'i' } },
+        { productno: { $regex: search || "", $options: 'i' } }
+      ]
+    }
+  },
+  {
+    $group: {
+      _id: "$category",
+      products: {
+        $push: {
+          _id: "$_id",
+          productno: "$productno",
+          name: "$name",
+          purchaseprice: "$purchaseprice",
+          saleprice: "$saleprice",
+          quantity: "$quantity",
+          description: "$description",
+          quantityType: "$quantityType",
+          status: "$status"
         }
       }
-    ]);
-
+    }
+  }
+]);
+// Log the aggregation pipeline result
+console.log("Aggregation pipeline result:", products);
     // Precompute stock alerts
-    const stockAlerts = products.flatMap(group =>
-      group.products.filter(product => product.status === "Low Stock" || product.status === "Out Of Stock")
-    );
+   // Precompute stock alerts
+const stockAlerts = products.flatMap(group =>
+  group.products.filter(product => product.status === "Low Stock" || product.status === "Out Of Stock")
+);
 
-    res.json({
-      products,
-      stockAlerts: stockAlerts.length > 0 ? stockAlerts : null // Include stock alerts in the response
-    });
+// Log the final response being sent to the frontend
+console.log("Backend response:", {
+  products,
+  stockAlerts: stockAlerts.length > 0 ? stockAlerts : null
+});
+
+res.json({
+  products,
+  stockAlerts: stockAlerts.length > 0 ? stockAlerts : null // Include stock alerts in the response
+});
   } catch (err) {
     console.error("Error fetching products:", err); // Log the error
     res.status(500).json({ message: "Error fetching products." });
@@ -614,36 +634,47 @@ app.get('/reports', async (req, res) => {
 
 // Endpoint to create an order
 app.post('/orders', async (req, res) => {
-  const { product, quantity, totalPrice, userId } = req.body; // Use userId instead of userName
+  const { product, quantity, totalPrice, userId, branchManagerId } = req.body;
 
-  if (!product || quantity <= 0 || totalPrice <= 0 || !userId) {
-    return res.status(400).json({ error: "Product ID, quantity, total price, and user ID are required" });
+  if (!product || quantity <= 0 || totalPrice <= 0 || !userId || !branchManagerId) {
+    return res.status(400).json({ error: "Product ID, quantity, total price, user ID, and branch manager ID are required" });
   }
 
-  // Validate ObjectId for product and userId
-  if (!mongoose.Types.ObjectId.isValid(product) || !mongoose.Types.ObjectId.isValid(userId)) {
-    return res.status(400).json({ error: "Invalid Product ID or User ID" });
+  // Validate ObjectIds
+  if (
+    !mongoose.Types.ObjectId.isValid(product) ||
+    !mongoose.Types.ObjectId.isValid(userId) ||
+    !mongoose.Types.ObjectId.isValid(branchManagerId)
+  ) {
+    return res.status(400).json({ error: "Invalid Product ID, User ID, or Branch Manager ID" });
   }
 
   try {
+    // Find the product to verify its existence
     const productDoc = await ProductModel.findById(product);
     if (!productDoc) {
       return res.status(404).json({ error: "Product not found" });
     }
 
+    // Create the order
     const order = new OrderModel({
       product,
       quantity,
       totalPrice,
-      userId, // Store userId
+      userId,
+      branchId: productDoc.branchId, // Use the branchId from the product
+      branchManagerId, // Store the branchManagerId
       dateOrdered: new Date(),
-      status: 'Pending' // Ensure status is set to "Pending" when order is created
+      status: 'Pending'
     });
 
     await order.save();
 
-    // Populate product information
-    const populatedOrder = await OrderModel.findById(order._id).populate('product');
+    // Populate product and branch information
+    const populatedOrder = await OrderModel.findById(order._id)
+      .populate('product')
+      .populate('branchId')
+      .populate('branchManagerId');
 
     res.json(populatedOrder);
   } catch (error) {
@@ -651,7 +682,6 @@ app.post('/orders', async (req, res) => {
     res.status(500).json({ error: "Error creating order", details: error.message });
   }
 });
-
 // Endpoint to get all orders
 app.get("/orders", (req, res) => {
   const { userId } = req.query;
@@ -675,14 +705,34 @@ app.get("/orders", (req, res) => {
 
 // Get all orders
 // Get all orders with populated user data
-app.get('/admin/orders', async (req, res) => {
+// Get all orders for a branch manager
+// GET /admin/orders
+app.get("/admin/orders", async (req, res) => {
+  const { branchManagerId } = req.query;
+
+  if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
+    return res.status(400).json({ error: "Invalid or missing branch manager ID" });
+  }
+
   try {
-    const orders = await OrderModel.find()
-      .populate({
-        path: 'userId', // Populate the user field
-        select: 'name address phone' // Select the fields you want to show in the admin panel
-      })
-      .populate('product'); // Populate product details
+    // Find all branches managed by the branch manager
+    const branches = await BranchModel.find({ manager: branchManagerId });
+
+    // Extract branch IDs
+    const branchIds = branches.map(branch => branch._id);
+
+    if (branchIds.length === 0) {
+      return res.status(404).json({ error: "No branches found for this branch manager" });
+    }
+
+    // Find all orders where the branchId matches one of the branch manager's branches
+    const orders = await OrderModel.find({ branchId: { $in: branchIds } })
+      .populate("userId", "name address phone")
+      .populate("product");
+
+    if (orders.length === 0) {
+      return res.status(404).json({ error: "No orders found for this branch manager" });
+    }
 
     res.json(orders);
   } catch (error) {
@@ -690,7 +740,6 @@ app.get('/admin/orders', async (req, res) => {
     res.status(500).json({ error: "Error fetching orders", details: error.message });
   }
 });
-
 // Confirm an order
 app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
   try {
