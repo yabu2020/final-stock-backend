@@ -571,29 +571,63 @@ app.post('/reports', async (req, res) => {
   end.setHours(23, 59, 59, 999); // Set end of day
 
   try {
-    // Fetch assignments within the date range and filter by branchManagerId
+    // Fetch confirmed orders within the date range and filter by branch manager
+    const orders = await OrderModel.find({
+      dateOrdered: { $gte: start, $lte: end },
+      branchManagerId: branchManagerId, // Filter by branch manager
+      status: "Confirmed", // Only include confirmed orders
+    }).populate('product', 'name purchaseprice saleprice quantity status');
+
+    // Fetch sold products (assignments) within the date range and filter by branch manager
     const assignments = await AssignmentModel.find({
       dateAssigned: { $gte: start, $lte: end },
       branchManagerId: branchManagerId, // Filter by branch manager
     }).populate('product', 'name purchaseprice quantity status');
 
-    if (assignments.length === 0) {
-      return res.status(404).json({ error: 'No sold products found for the given date range' });
-    }
+    // Combine data from confirmed orders and assignments
+    const totalSalesFromOrders = orders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
+    const costPriceFromOrders = orders.reduce(
+      (sum, order) => sum + ((order.product?.purchaseprice || 0) * (order.quantity || 0)),
+      0
+    );
 
-    const totalSales = assignments.reduce((sum, assignment) => sum + (assignment.totalPrice || 0), 0);
-    const costPrice = assignments.reduce((sum, assignment) => sum + (assignment.product?.purchaseprice || 0) * (assignment.quantity || 0), 0);
+    const totalSalesFromAssignments = assignments.reduce(
+      (sum, assignment) => sum + (assignment.totalPrice || 0),
+      0
+    );
+    const costPriceFromAssignments = assignments.reduce(
+      (sum, assignment) => sum + ((assignment.product?.purchaseprice || 0) * (assignment.quantity || 0)),
+      0
+    );
+
+    // Calculate totals
+    const totalSales = totalSalesFromOrders + totalSalesFromAssignments;
+    const costPrice = costPriceFromOrders + costPriceFromAssignments;
     const profitOrLoss = totalSales - costPrice;
 
-    const reportData = assignments.map(assignment => ({
-      productName: assignment.product.name,
-      quantity: assignment.quantity,
-      totalPrice: assignment.totalPrice,
-      dateAssigned: assignment.dateAssigned,
-      stockLevel: assignment.product.quantity,
-      status: assignment.product.status
-    }));
+    // Prepare report data
+    const reportData = [
+      ...orders.map(order => ({
+        productName: order.product.name,
+        quantity: order.quantity,
+        totalPrice: order.totalPrice,
+        date: order.dateOrdered,
+        stockLevel: order.product.quantity,
+        status: order.product.status,
+        source: "Order",
+      })),
+      ...assignments.map(assignment => ({
+        productName: assignment.product.name,
+        quantity: assignment.quantity,
+        totalPrice: assignment.totalPrice,
+        date: assignment.dateAssigned,
+        stockLevel: assignment.product.quantity,
+        status: assignment.product.status,
+        source: "Sold Product",
+      })),
+    ];
 
+    // Create and save the report
     const report = new ReportModel({
       startDate,
       endDate,
@@ -610,8 +644,6 @@ app.post('/reports', async (req, res) => {
     res.status(500).json({ error: "Error generating report", details: error.message });
   }
 });
-
-
 // Endpoint to get all reports
 app.get('/reports', async (req, res) => {
   const { branchManagerId } = req.query;
@@ -634,26 +666,52 @@ app.get('/reports', async (req, res) => {
 
 // Endpoint to create an order
 app.post('/orders', async (req, res) => {
-  const { product, quantity, totalPrice, userId, branchManagerId } = req.body;
+  console.log("Received order request:", req.body); // Debugging line
 
-  if (!product || quantity <= 0 || totalPrice <= 0 || !userId || !branchManagerId) {
-    return res.status(400).json({ error: "Product ID, quantity, total price, user ID, and branch manager ID are required" });
+  const { product, quantity, totalPrice, userId, branchManagerId, branchId } = req.body;
+
+  if (!product || !quantity || !totalPrice || !userId || !branchManagerId || !branchId) {
+    return res.status(400).json({ error: "Missing required fields" });
   }
 
   // Validate ObjectIds
   if (
     !mongoose.Types.ObjectId.isValid(product) ||
     !mongoose.Types.ObjectId.isValid(userId) ||
-    !mongoose.Types.ObjectId.isValid(branchManagerId)
+    !mongoose.Types.ObjectId.isValid(branchManagerId) ||
+    !mongoose.Types.ObjectId.isValid(branchId)
   ) {
-    return res.status(400).json({ error: "Invalid Product ID, User ID, or Branch Manager ID" });
+    return res.status(400).json({ error: "Invalid Product ID, User ID, Branch Manager ID, or Branch ID" });
   }
 
   try {
-    // Find the product to verify its existence
+    // Verify product exists
     const productDoc = await ProductModel.findById(product);
     if (!productDoc) {
       return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Verify user exists
+    const userDoc = await EmployeeModel.findById(userId);
+    if (!userDoc) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Verify branch manager exists
+    const branchManagerDoc = await EmployeeModel.findById(branchManagerId);
+    if (!branchManagerDoc) {
+      return res.status(404).json({ error: "Branch manager not found" });
+    }
+
+    // Verify branch exists
+    const branchDoc = await BranchModel.findById(branchId);
+    if (!branchDoc) {
+      return res.status(404).json({ error: "Branch not found" });
+    }
+
+    // Check stock level
+    if (productDoc.quantity < quantity) {
+      return res.status(400).json({ error: "Insufficient stock", remainingStock: productDoc.quantity });
     }
 
     // Create the order
@@ -662,13 +720,16 @@ app.post('/orders', async (req, res) => {
       quantity,
       totalPrice,
       userId,
-      branchId: productDoc.branchId, // Use the branchId from the product
-      branchManagerId, // Store the branchManagerId
+      branchId, // Use the branchId from the request payload
+      branchManagerId,
       dateOrdered: new Date(),
       status: 'Pending'
     });
 
     await order.save();
+
+    // Update product stock
+    await ProductModel.findByIdAndUpdate(product, { $inc: { quantity: -quantity } });
 
     // Populate product and branch information
     const populatedOrder = await OrderModel.findById(order._id)
@@ -702,9 +763,6 @@ app.get("/orders", (req, res) => {
     });
 });
 
-
-// Get all orders
-// Get all orders with populated user data
 // Get all orders for a branch manager
 // GET /admin/orders
 app.get("/admin/orders", async (req, res) => {
@@ -730,8 +788,9 @@ app.get("/admin/orders", async (req, res) => {
       .populate("userId", "name address phone")
       .populate("product");
 
+    // Return an empty array if no orders are found
     if (orders.length === 0) {
-      return res.status(404).json({ error: "No orders found for this branch manager" });
+      return res.status(200).json([]); // Return an empty array with a 200 status
     }
 
     res.json(orders);
@@ -745,6 +804,7 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
   try {
     const { orderId } = req.params;
 
+    // Find the order and populate the product details
     const order = await OrderModel.findById(orderId).populate('product');
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
@@ -754,23 +814,30 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
       return res.status(400).json({ error: "Product not found for this order" });
     }
 
+    // Check if there is sufficient stock
     if (order.product.quantity < order.quantity) {
       return res.status(400).json({ error: "Insufficient stock" });
     }
 
-    // Reduce product stock
+    // Reduce the product stock
     order.product.quantity -= order.quantity;
-    order.product.status = order.product.quantity === 0 ? 'Out Of Stock' : order.product.quantity < 5 ? 'Low Stock' : 'Available';
+    order.product.status =
+      order.product.quantity === 0
+        ? 'Out Of Stock'
+        : order.product.quantity < 5
+        ? 'Low Stock'
+        : 'Available';
 
+    // Save the updated product
     await order.product.save();
 
     // Confirm the order
     order.status = 'Confirmed';
     await order.save();
 
-    // Fetch updated order
+    // Fetch the updated order with populated fields
     const updatedOrder = await OrderModel.findById(order._id).populate('userId product');
-    
+
     res.json(updatedOrder);
   } catch (error) {
     console.error("Error confirming order:", error.message, error.stack);
@@ -782,25 +849,34 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
 
 app.patch('/admin/orders/:orderId/reject', async (req, res) => {
   try {
-    const order = await OrderModel.findById(req.params.orderId).populate('product');
-    
+    const { orderId } = req.params;
+
+    // Find the order and populate the product details
+    const order = await OrderModel.findById(orderId).populate('product');
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // If the order was previously confirmed, reverse the stock
+    // If the order was confirmed, restore the product stock
     if (order.status === 'Confirmed') {
       order.product.quantity += order.quantity;
-      await order.product.save(); // Save the updated stock
+      order.product.status =
+        order.product.quantity === 0
+          ? 'Out Of Stock'
+          : order.product.quantity < 5
+          ? 'Low Stock'
+          : 'Available';
+
+      // Save the updated product
+      await order.product.save();
     }
 
     // Update the order status to "Rejected"
     order.status = 'Rejected';
-    await order.save(); // Save the updated order status
+    await order.save();
 
-    // Repopulate the user and product data for the response
-    const updatedOrder = await OrderModel.findById(order._id)
-      .populate('userId product');
+    // Fetch the updated order with populated fields
+    const updatedOrder = await OrderModel.findById(order._id).populate('userId product');
 
     res.json(updatedOrder);
   } catch (error) {
@@ -808,7 +884,6 @@ app.patch('/admin/orders/:orderId/reject', async (req, res) => {
     res.status(500).json({ error: "Error rejecting order", details: error.message });
   }
 });
-
 // Endpoint to reset password
 app.post("/resetpassword", async (req, res) => {
   const { name, newPassword } = req.body;
