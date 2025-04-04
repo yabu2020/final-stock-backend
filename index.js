@@ -951,6 +951,8 @@ app.post('/validate-security', async (req, res) => {
 app.get('/security-question', async (req, res) => {
   const { userId } = req.query; // Get the userId from query parameters
 
+  console.log("Received userId:", userId); // Log the userId
+
   if (!userId) {
     return res.status(400).json({ message: 'User ID is required' });
   }
@@ -970,7 +972,6 @@ app.get('/security-question', async (req, res) => {
     res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
-
 app.post('/update-security-question', async (req, res) => {
   const { userId, newSecurityQuestion, newSecurityAnswer } = req.body;
 
