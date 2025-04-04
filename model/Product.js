@@ -26,6 +26,7 @@ const ProductSchema = new mongoose.Schema({
     ref: 'Employee', 
     required: true 
   },
+  image: { type: String }, // Add this field for the image path
 }, { timestamps: true });
 
 const ProductModel = mongoose.model("Product", ProductSchema);

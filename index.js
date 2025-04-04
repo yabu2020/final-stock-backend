@@ -10,12 +10,39 @@ const OrderModel = require('./model/Order');
 const ReportModel = require('./model/Report'); 
 const CategoryModel = require("./model/Category");
 const BranchModel = require("./model/Branch");
-
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
+
+
 app.use(express.json());
 app.use(cors());
 app.use(bodyParser.json());
+// Ensure the "uploads/" directory exists
+const uploadDir = path.join(__dirname, "uploads"); // Define uploadDir here
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Serve static files from the "uploads/" directory
+app.use("/uploads", express.static(uploadDir)); // Use uploadDir after it's defined
+
+// Configure Multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir); // Use uploadDir here
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`); // Rename the file to avoid conflicts
+  },
+});
+
+const upload = multer({ storage });
+
+// Middleware to parse JSON
+app.use(express.json());
 
 mongoose.connect(
   "mongodb+srv://yeabsiraayalew6:yabu2020@cluster0.s3vfs.mongodb.net/",
@@ -291,51 +318,53 @@ app.get('/categories', async (req, res) => {
   }
 });
 // Register Product Route
-app.post('/registerproduct', async (req, res) => {
+app.post("/registerproduct", upload.single("image"), async (req, res) => {
   try {
-    const products = req.body; // Array of product objects
+    const { name, purchaseprice, saleprice, quantity, description, category, branchManagerId } = req.body;
+    const imagePath = req.file ? req.file.path : null; // Get the path of the uploaded image
 
-    if (!Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({ error: 'Invalid data. Array of products is required.' });
+    // Validate required fields
+    if (!name || !purchaseprice || !saleprice || !category || !branchManagerId) {
+      return res.status(400).json({ error: "Missing required fields." });
     }
 
-    const savedProducts = await Promise.all(products.map(async (product) => {
-      // Validate required fields
-      if (!product.name || !product.category || !product.saleprice || !product.purchaseprice) {
-        throw new Error('Name, category, purchase price, and sale price are required.');
-      }
+    // Convert prices to numbers for validation
+    const purchasePrice = parseFloat(purchaseprice);
+    const salePrice = parseFloat(saleprice);
 
-      // Convert prices to numbers for validation
-      const purchasePrice = parseFloat(product.purchaseprice);
-      const salePrice = parseFloat(product.saleprice);
+    if (isNaN(purchasePrice) || isNaN(salePrice)) {
+      return res.status(400).json({ error: "Purchase price and sale price must be valid numbers." });
+    }
 
-      if (isNaN(purchasePrice) || isNaN(salePrice)) {
-        throw new Error('Purchase price and sale price must be valid numbers.');
-      }
+    // Check if the category exists in the database
+    const categoryExists = await CategoryModel.findById(category);
+    if (!categoryExists) {
+      return res.status(400).json({ error: "Category not found." });
+    }
 
-      // Check if the category exists in the database
-      const categoryExists = await CategoryModel.findById(product.category);
-      if (!categoryExists) {
-        throw new Error('Category not found.');
-      }
+    // Ensure branchManagerId is provided and valid
+    if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
+      return res.status(400).json({ error: "Invalid or missing branch manager ID." });
+    }
 
-      // Ensure branchManagerId is provided and valid
-      const branchManagerId = product.branchManagerId;
-      if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
-        throw new Error('Invalid or missing branch manager ID.');
-      }
+    // Create the product with the image path
+    const newProduct = new ProductModel({
+      name,
+      purchaseprice: purchasePrice,
+      saleprice: salePrice,
+      quantity: quantity || 1, // Default to 1 if not provided
+      description,
+      category: categoryExists._id,
+      branchManagerId,
+      image: imagePath, // Save the image path in the database
+    });
 
-      // Save the product with the existing category and branch manager association
-      return new ProductModel({
-        ...product,
-        category: categoryExists._id, // Ensure category reference is by its ID
-        branchManagerId: branchManagerId, // Associate product with branch manager
-      }).save();
-    }));
+    // Save the product to the database
+    await newProduct.save();
 
-    res.status(201).json({ message: 'Products registered successfully.', products: savedProducts });
+    res.status(201).json({ message: "Product registered successfully.", product: newProduct });
   } catch (error) {
-    console.error('Error registering products:', error);
+    console.error("Error registering product:", error);
     res.status(400).json({ error: error.message });
   }
 });
@@ -377,7 +406,8 @@ const objectIdBranchManagerId = new mongoose.Types.ObjectId(branchManagerId);
           quantity: "$quantity",
           description: "$description",
           quantityType: "$quantityType",
-          status: "$status"
+          status: "$status",
+          image: "$image", // Include the image path
         }
       }
     }
