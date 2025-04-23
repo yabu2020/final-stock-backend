@@ -16,6 +16,9 @@ const path = require("path");
 
 const app = express();
 
+const normalizePhone = (phone) => phone.trim().toLowerCase();
+const normalizename = (name) => name.trim().toLowerCase();
+
 
 app.use(express.json());
 app.use(cors());
@@ -135,6 +138,60 @@ app.post("/adduser", async (req, res) => {
     }
   }
 });
+// Signup route
+// Signup route
+app.post("/signup", async (req, res) => {
+  const { name, phone, password, address } = req.body;
+
+  try {
+    // Normalize inputs
+    const normalizedPhone = phone.trim().toLowerCase();
+    const normalizedName = name.trim().toLowerCase();
+
+    // Validate password
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
+    }
+
+    // Check if the name is already registered
+    const userWithName = await EmployeeModel.findOne({ name: normalizedName });
+    if (userWithName) {
+      return res.status(400).json({ error: "User with this name is already registered" });
+    }
+
+    // Check if the phone number is already registered
+    const userWithPhone = await EmployeeModel.findOne({ phone: normalizedPhone });
+    if (userWithPhone) {
+      return res.status(400).json({ error: "Phone number is already registered" });
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create a new user
+    const newUser = new EmployeeModel({
+      role: "user",
+      name: normalizedName, // Use the normalized name
+      phone: normalizedPhone, // Use the normalized phone number
+      password: hashedPassword,
+      address,
+    });
+
+    // Save the user to the database
+    const savedUser = await newUser.save();
+    res.json(savedUser);
+  } catch (err) {
+    console.error("Error during signup:", err);
+    if (err.code === 11000) {
+      // Handle unique constraint violations (shouldn't happen due to checks above)
+      res.status(400).json({ error: "Duplicate entry for name or phone number" });
+    } else {
+      res.status(500).json({ error: "Error signing up" });
+    }
+  }
+});
+
 
 app.get("/users", async (req, res) => {
   try {
