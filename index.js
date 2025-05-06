@@ -139,7 +139,6 @@ app.post("/adduser", async (req, res) => {
   }
 });
 // Signup route
-// Signup route
 app.post("/signup", async (req, res) => {
   const { name, phone, password, address } = req.body;
 
@@ -430,64 +429,55 @@ app.post("/registerproduct", upload.single("image"), async (req, res) => {
 app.get("/productlist", async (req, res) => {
   const { search, branchManagerId } = req.query;
 
-  // console.log("Received request with branchManagerId:", branchManagerId); // Log the branchManagerId
   // Validate branchManagerId
   if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
-  console.error("Invalid or missing branch manager ID:", branchManagerId);
-  return res.status(400).json({ message: "Invalid or missing branch manager ID." });
-}
+    console.error("Invalid or missing branch manager ID:", branchManagerId);
+    return res.status(400).json({ message: "Invalid or missing branch manager ID." });
+  }
 
   try {
     // Convert branchManagerId to ObjectId
-const objectIdBranchManagerId = new mongoose.Types.ObjectId(branchManagerId);
+    const objectIdBranchManagerId = new mongoose.Types.ObjectId(branchManagerId);
     const products = await ProductModel.aggregate([
-       {
-    $match: {
-      branchManagerId: objectIdBranchManagerId,
-      $or: [
-        { name: { $regex: search || "", $options: 'i' } },
-        { productno: { $regex: search || "", $options: 'i' } }
-      ]
-    }
-  },
-  {
-    $group: {
-      _id: "$category",
-      products: {
-        $push: {
-          _id: "$_id",
-          productno: "$productno",
-          name: "$name",
-          purchaseprice: "$purchaseprice",
-          saleprice: "$saleprice",
-          quantity: "$quantity",
-          description: "$description",
-          quantityType: "$quantityType",
-          status: "$status",
-          image: "$image", // Include the image path
+      {
+        $match: {
+          branchManagerId: objectIdBranchManagerId,
+          $or: [
+            { name: { $regex: search || "", $options: 'i' } },
+            { productno: { $regex: search || "", $options: 'i' } }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: "$category",
+          products: {
+            $push: {
+              _id: "$_id",
+              productno: "$productno",
+              name: "$name",
+              purchaseprice: "$purchaseprice",
+              saleprice: "$saleprice",
+              quantity: "$quantity",
+              description: "$description",
+              quantityType: "$quantityType",
+              status: "$status",
+              image: "$image", // Include the image path
+            }
+          }
         }
       }
-    }
-  }
-]);
-// Log the aggregation pipeline result
-console.log("Aggregation pipeline result:", products);
+    ]);
+
     // Precompute stock alerts
-   // Precompute stock alerts
-const stockAlerts = products.flatMap(group =>
-  group.products.filter(product => product.status === "Low Stock" || product.status === "Out Of Stock")
-);
+    const stockAlerts = products.flatMap(group =>
+      group.products.filter(product => product.status === "Low Stock" || product.status === "Out Of Stock")
+    );
 
-// Log the final response being sent to the frontend
-console.log("Backend response:", {
-  products,
-  stockAlerts: stockAlerts.length > 0 ? stockAlerts : null
-});
-
-res.json({
-  products,
-  stockAlerts: stockAlerts.length > 0 ? stockAlerts : null // Include stock alerts in the response
-});
+    res.json({
+      products,
+      stockAlerts: stockAlerts.length > 0 ? stockAlerts : null // Include stock alerts in the response
+    });
   } catch (err) {
     console.error("Error fetching products:", err); // Log the error
     res.status(500).json({ message: "Error fetching products." });
@@ -555,10 +545,9 @@ app.delete('/deleteproduct/:id', async (req, res) => {
     return res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
 app.post("/sellproduct", async (req, res) => {
   const { productId, quantity, totalPrice, branchManagerId } = req.body;
-
-  console.log(`Received productId: ${productId}, quantity: ${quantity}, totalPrice: ${totalPrice}, branchManagerId: ${branchManagerId}`);
 
   if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
     return res.status(400).json({ error: "Invalid branch manager ID" });
@@ -610,7 +599,7 @@ app.post("/sellproduct", async (req, res) => {
       totalPrice,
       costPrice,
       dateAssigned: new Date(),
-      branchManagerId, // Include the branch manager's ID
+      branchManagerId,
     });
     
     await assignment.save({ session });
@@ -618,14 +607,12 @@ app.post("/sellproduct", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Send back both the assignment details and the updated product status
     res.json({ assignment, status: product.status });
   } catch (error) {
     console.error("Error assigning product:", error);
     res.status(500).json({ error: "Error assigning product", details: error.message });
   }
 });
-
 
 // Endpoint to get all sold products
 app.get("/assigned-products", async (req, res) => {
@@ -637,7 +624,7 @@ app.get("/assigned-products", async (req, res) => {
 
   try {
     const assignments = await AssignmentModel.find({ branchManagerId })
-      .populate('product') // Populate product details
+      .populate('product')
       .exec();
 
     res.json(assignments);
@@ -646,6 +633,7 @@ app.get("/assigned-products", async (req, res) => {
     res.status(500).json({ message: "Error fetching assigned products." });
   }
 });
+
 app.post('/reports', async (req, res) => {
   const { startDate, endDate, branchManagerId } = req.body;
 
@@ -655,23 +643,20 @@ app.post('/reports', async (req, res) => {
 
   const start = new Date(startDate);
   const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999); // Set end of day
+  end.setHours(23, 59, 59, 999);
 
   try {
-    // Fetch confirmed orders within the date range and filter by branch manager
     const orders = await OrderModel.find({
       dateOrdered: { $gte: start, $lte: end },
-      branchManagerId: branchManagerId, // Filter by branch manager
-      status: "Confirmed", // Only include confirmed orders
+      branchManagerId: branchManagerId,
+      status: "Confirmed",
     }).populate('product', 'name purchaseprice saleprice quantity status');
 
-    // Fetch sold products (assignments) within the date range and filter by branch manager
     const assignments = await AssignmentModel.find({
       dateAssigned: { $gte: start, $lte: end },
-      branchManagerId: branchManagerId, // Filter by branch manager
+      branchManagerId: branchManagerId,
     }).populate('product', 'name purchaseprice quantity status');
 
-    // Combine data from confirmed orders and assignments
     const totalSalesFromOrders = orders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
     const costPriceFromOrders = orders.reduce(
       (sum, order) => sum + ((order.product?.purchaseprice || 0) * (order.quantity || 0)),
@@ -687,12 +672,10 @@ app.post('/reports', async (req, res) => {
       0
     );
 
-    // Calculate totals
     const totalSales = totalSalesFromOrders + totalSalesFromAssignments;
     const costPrice = costPriceFromOrders + costPriceFromAssignments;
     const profitOrLoss = totalSales - costPrice;
 
-    // Prepare report data
     const reportData = [
       ...orders.map(order => ({
         productName: order.product.name,
@@ -714,14 +697,13 @@ app.post('/reports', async (req, res) => {
       })),
     ];
 
-    // Create and save the report
     const report = new ReportModel({
       startDate,
       endDate,
       totalSales,
       profitOrLoss,
       reportData,
-      branchManagerId, // Include branch manager ID
+      branchManagerId,
     });
 
     await report.save();
@@ -731,6 +713,7 @@ app.post('/reports', async (req, res) => {
     res.status(500).json({ error: "Error generating report", details: error.message });
   }
 });
+
 // Endpoint to get all reports
 app.get('/reports', async (req, res) => {
   const { branchManagerId } = req.query;
@@ -741,7 +724,7 @@ app.get('/reports', async (req, res) => {
 
   try {
     const reports = await ReportModel.find({ branchManagerId })
-      .sort({ createdAt: -1 }) // Sort by most recent
+      .sort({ createdAt: -1 })
       .exec();
 
     res.json(reports);
@@ -753,15 +736,12 @@ app.get('/reports', async (req, res) => {
 
 // Endpoint to create an order
 app.post('/orders', async (req, res) => {
-  console.log("Received order request:", req.body); // Debugging line
-
   const { product, quantity, totalPrice, userId, branchManagerId, branchId } = req.body;
 
   if (!product || !quantity || !totalPrice || !userId || !branchManagerId || !branchId) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  // Validate ObjectIds
   if (
     !mongoose.Types.ObjectId.isValid(product) ||
     !mongoose.Types.ObjectId.isValid(userId) ||
@@ -772,42 +752,36 @@ app.post('/orders', async (req, res) => {
   }
 
   try {
-    // Verify product exists
     const productDoc = await ProductModel.findById(product);
     if (!productDoc) {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // Verify user exists
     const userDoc = await EmployeeModel.findById(userId);
     if (!userDoc) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Verify branch manager exists
     const branchManagerDoc = await EmployeeModel.findById(branchManagerId);
     if (!branchManagerDoc) {
       return res.status(404).json({ error: "Branch manager not found" });
     }
 
-    // Verify branch exists
     const branchDoc = await BranchModel.findById(branchId);
     if (!branchDoc) {
       return res.status(404).json({ error: "Branch not found" });
     }
 
-    // Check stock level
     if (productDoc.quantity < quantity) {
       return res.status(400).json({ error: "Insufficient stock", remainingStock: productDoc.quantity });
     }
 
-    // Create the order
     const order = new OrderModel({
       product,
       quantity,
       totalPrice,
       userId,
-      branchId, // Use the branchId from the request payload
+      branchId,
       branchManagerId,
       dateOrdered: new Date(),
       status: 'Pending'
@@ -815,10 +789,8 @@ app.post('/orders', async (req, res) => {
 
     await order.save();
 
-    // Update product stock
     await ProductModel.findByIdAndUpdate(product, { $inc: { quantity: -quantity } });
 
-    // Populate product and branch information
     const populatedOrder = await OrderModel.findById(order._id)
       .populate('product')
       .populate('branchId')
@@ -830,6 +802,7 @@ app.post('/orders', async (req, res) => {
     res.status(500).json({ error: "Error creating order", details: error.message });
   }
 });
+
 // Endpoint to get all orders
 app.get("/orders", (req, res) => {
   const { userId } = req.query;
@@ -886,6 +859,7 @@ app.get("/admin/orders", async (req, res) => {
     res.status(500).json({ error: "Error fetching orders", details: error.message });
   }
 });
+
 // Confirm an order
 app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
   try {
@@ -932,8 +906,6 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
   }
 });
 
-
-
 app.patch('/admin/orders/:orderId/reject', async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -971,6 +943,7 @@ app.patch('/admin/orders/:orderId/reject', async (req, res) => {
     res.status(500).json({ error: "Error rejecting order", details: error.message });
   }
 });
+
 // Endpoint to reset password
 app.post("/resetpassword", async (req, res) => {
   const { name, newPassword } = req.body;
@@ -1008,7 +981,6 @@ app.post("/resetpassword", async (req, res) => {
   }
 });
 
-
 app.post('/validate-security', async (req, res) => {
   const { name, securityQuestion, securityAnswer } = req.body;
 
@@ -1038,8 +1010,6 @@ app.post('/validate-security', async (req, res) => {
 app.get('/security-question', async (req, res) => {
   const { userId } = req.query; // Get the userId from query parameters
 
-  console.log("Received userId:", userId); // Log the userId
-
   if (!userId) {
     return res.status(400).json({ message: 'User ID is required' });
   }
@@ -1059,6 +1029,7 @@ app.get('/security-question', async (req, res) => {
     res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
+
 app.post('/update-security-question', async (req, res) => {
   const { userId, newSecurityQuestion, newSecurityAnswer } = req.body;
 
