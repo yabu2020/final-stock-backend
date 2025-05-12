@@ -13,8 +13,9 @@ const BranchModel = require("./model/Branch");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-
+const axios = require("axios");
 const app = express();
+
 
 const normalizePhone = (phone) => phone.trim().toLowerCase();
 const normalizename = (name) => name.trim().toLowerCase();
@@ -66,7 +67,68 @@ const validatePassword = (password) => {
   return null;
 };
 
+app.post("/api/pay", async (req, res) => {
+  try {
+    const chapaUrl = "https://api.chapa.co/v1/transaction/initialize";
+    const secretKey = "CHASECK_TEST-z8hnOz0YewilQrzs1CSujy2KBoBXR9i6"; // your test secret key
 
+    const payload = {
+      amount: "100",
+      currency: "ETB",
+      email: "testuser@example.com",
+      first_name: "Test",
+      last_name: "User",
+      tx_ref: "tx-" + Date.now(),
+      callback_url: "https://yourdomain.com/callback",
+      return_url: "https://yourdomain.com/success",
+      customization: {
+        title: "Final Project",
+        description: "Test Payment"
+      }
+    };
+
+    const response = await axios.post(chapaUrl, payload, {
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    res.json({ checkoutUrl: response.data.data.checkout_url });
+
+  } catch (error) {
+    console.error(error.response?.data || error.message);
+    res.status(500).json({ error: "Payment initialization failed" });
+  }
+});
+app.post('/api/payments/initiate', async (req, res) => {
+  const { amount, email, first_name, last_name, tx_ref, return_url } = req.body;
+
+  try {
+    const response = await axios.post(
+      'https://api.chapa.co/v1/transaction/initialize',
+      {
+        amount,
+        currency: 'ETB',
+        email,
+        first_name,
+        last_name,
+        tx_ref,
+        callback_url: return_url,
+      },
+      {
+        headers: {
+          Authorization: 'Bearer CHASECK_TEST-z8hnOz0YewilQrzs1CSujy2KBoBXR9i6',
+        },
+      }
+    );
+
+    res.status(200).json({ checkout_url: response.data.data.checkout_url });
+  } catch (error) {
+    console.error(error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to initialize payment' });
+  }
+});
 app.post("/", async (req, res) => {
   const { name, password } = req.body;
 
@@ -789,7 +851,6 @@ app.post('/orders', async (req, res) => {
 
     await order.save();
 
-    await ProductModel.findByIdAndUpdate(product, { $inc: { quantity: -quantity } });
 
     const populatedOrder = await OrderModel.findById(order._id)
       .populate('product')
