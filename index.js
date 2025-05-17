@@ -436,53 +436,69 @@ app.get('/categories', async (req, res) => {
   }
 });
 // Register Product Route
-app.post("/registerproduct", upload.single("image"), async (req, res) => {
+app.post("/addproduct", upload.single("image"), async (req, res) => {
   try {
-    const { name, purchaseprice, saleprice, quantity, description, category, branchManagerId } = req.body;
-    const imagePath = req.file ? req.file.path : null; // Get the path of the uploaded image
+    const { name, purchaseprice, saleprice, description, category } = req.body;
+    const imagePath = req.file ? req.file.path : null;
 
-    // Validate required fields
-    if (!name || !purchaseprice || !saleprice || !category || !branchManagerId) {
+    if (!name || !purchaseprice || !saleprice || !category) {
       return res.status(400).json({ error: "Missing required fields." });
     }
 
-    // Convert prices to numbers for validation
     const purchasePrice = parseFloat(purchaseprice);
     const salePrice = parseFloat(saleprice);
 
     if (isNaN(purchasePrice) || isNaN(salePrice)) {
-      return res.status(400).json({ error: "Purchase price and sale price must be valid numbers." });
+      return res.status(400).json({ error: "Invalid prices." });
     }
 
-    // Check if the category exists in the database
     const categoryExists = await CategoryModel.findById(category);
     if (!categoryExists) {
       return res.status(400).json({ error: "Category not found." });
     }
 
-    // Ensure branchManagerId is provided and valid
-    if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
-      return res.status(400).json({ error: "Invalid or missing branch manager ID." });
-    }
-
-    // Create the product with the image path
     const newProduct = new ProductModel({
       name,
       purchaseprice: purchasePrice,
       saleprice: salePrice,
-      quantity: quantity || 1, // Default to 1 if not provided
       description,
       category: categoryExists._id,
-      branchManagerId,
-      image: imagePath, // Save the image path in the database
+      image: imagePath,
     });
 
-    // Save the product to the database
     await newProduct.save();
-
-    res.status(201).json({ message: "Product registered successfully.", product: newProduct });
+    res.status(201).json({ message: "Product added successfully.", product: newProduct });
   } catch (error) {
-    console.error("Error registering product:", error);
+    console.error("Error adding product:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/buyproduct", async (req, res) => {
+  try {
+    const { productId, quantity, supplier } = req.body;
+
+    if (!productId || !quantity || !supplier) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    const parsedQuantity = parseInt(quantity, 10);
+    if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({ error: "Invalid quantity." });
+    }
+
+    const product = await ProductModel.findById(productId);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+
+    // Update the product's stock quantity
+    product.quantity += parsedQuantity;
+    await product.save();
+
+    res.status(201).json({ message: "Stock purchase recorded successfully.", product });
+  } catch (error) {
+    console.error("Error recording stock purchase:", error);
     res.status(400).json({ error: error.message });
   }
 });
