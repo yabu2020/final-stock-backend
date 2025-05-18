@@ -22,7 +22,10 @@ const normalizename = (name) => name.trim().toLowerCase();
 
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:5173',  // your frontend
+  credentials: true,                // allow cookies
+}));
 app.use(bodyParser.json());
 // Ensure the "uploads/" directory exists
 const uploadDir = path.join(__dirname, "uploads"); // Define uploadDir here
@@ -161,28 +164,26 @@ app.post("/", async (req, res) => {
   }
 });
 app.post("/adduser", async (req, res) => {
-  const { role, name, phone, password, address } = req.body;
-
-  if (!["user", "Admin", "manager", "asset approver"].includes(role)) {
-    return res.status(400).json({ error: "Invalid role" });
-  }
-
-  const passwordError = validatePassword(password);
-  if (passwordError) {
-    return res.status(400).json({ error: passwordError });
-  }
+  const { name, phone, address, password } = req.body;
 
   try {
-    const existingUser = await EmployeeModel.findOne
-    ({name: name });
-    if (existingUser) {
-      return res.status(400).json({ error: "User is already registered with this name " });
+    // Validate required fields
+    if (!name || !phone || !address || !password) {
+      return res.status(400).json({ error: "All fields are required" });
     }
 
+    // Check for duplicate phone
+    const existingUser = await EmployeeModel.findOne({ phone });
+    if (existingUser) {
+      return res.status(400).json({ error: "Duplicate phone" });
+    }
+
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Create new customer
     const newUser = new EmployeeModel({
-      role,
+      type: "user", // Customer type
       name,
       phone,
       password: hashedPassword,
@@ -192,7 +193,7 @@ app.post("/adduser", async (req, res) => {
     const savedUser = await newUser.save();
     res.json(savedUser);
   } catch (err) {
-    console.error("Error adding user:", err); // Log the detailed error
+    console.error("Error adding user:", err.message);
     if (err.code === 11000) {
       res.status(400).json({ error: "Duplicate phone" });
     } else {
@@ -232,7 +233,7 @@ app.post("/signup", async (req, res) => {
 
     // Create a new user
     const newUser = new EmployeeModel({
-      role: "user",
+      role: "customer",
       name: normalizedName, // Use the normalized name
       phone: normalizedPhone, // Use the normalized phone number
       password: hashedPassword,
@@ -255,8 +256,15 @@ app.post("/signup", async (req, res) => {
 
 
 app.get("/users", async (req, res) => {
+  const { type } = req.query; // Optional query parameter
+
   try {
-    const users = await EmployeeModel.find({}, "name role phone address"); // Include phone and address
+    let query = {};
+    if (type) {
+      query.type = type; // Filter by type (employee or customer)
+    }
+
+    const users = await EmployeeModel.find(query, "name role phone address");
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: "Error fetching users" });
@@ -306,6 +314,76 @@ app.put("/users/:id", (req, res) => {
           .json({ message: "Error updating user", error: err.message });
       }
     });
+});
+// Get all employees
+app.get("/employees", async (req, res) => {
+  try {
+    const employees = await EmployeeModel.find({ type: "employee" }, "name role phone address");
+    res.json(employees);
+  } catch (err) {
+    res.status(500).json({ error: "Error fetching employees" });
+  }
+});
+
+// Add a new employee
+app.post("/addemployee", async (req, res) => {
+  const { role, name, phone, address, password } = req.body;
+
+  // Validate role
+  if (!["user", "Admin", "manager", "asset approver"].includes(role)) {
+    return res.status(400).json({ error: "Invalid role" });
+  }
+
+  // Validate password
+  if (!password) {
+    return res.status(400).json({ error: "Password is required" });
+  }
+
+  try {
+    // Check for duplicate name
+    const existingEmployee = await EmployeeModel.findOne({ name });
+    if (existingEmployee) {
+      return res.status(400).json({ error: "Employee is already registered with this name" });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create new employee
+    const newEmployee = new EmployeeModel({
+      type: "employee",
+      role,
+      name,
+      phone,
+      address,
+      password: hashedPassword, // Save hashed password
+    });
+
+    const savedEmployee = await newEmployee.save();
+    res.json(savedEmployee);
+  } catch (err) {
+    console.error("Error adding employee:", err);
+    if (err.code === 11000) {
+      res.status(400).json({ error: "Duplicate phone" });
+    } else {
+      res.status(500).json({ error: "Error adding employee" });
+    }
+  }
+});
+
+// Delete an employee
+app.delete("/employees/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const deletedEmployee = await EmployeeModel.findByIdAndDelete(id);
+    if (!deletedEmployee) {
+      return res.status(404).json({ error: "Employee not found" });
+    }
+    res.json({ message: "Employee deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Error deleting employee" });
+  }
 });
 // Create Branch
 app.post("/addbranch", async (req, res) => {
@@ -1019,6 +1097,15 @@ app.patch('/admin/orders/:orderId/reject', async (req, res) => {
     console.error("Error rejecting order:", error);
     res.status(500).json({ error: "Error rejecting order", details: error.message });
   }
+});
+
+// In your Express server (e.g., index.js or server.js)
+app.get('/current_user', (req, res) => {
+  if (!req.session.user) {
+    return res.status(401).json({ error: "Not logged in" });
+  }
+
+  res.json(req.session.user); // Includes _id, role, etc.
 });
 
 // Endpoint to reset password
