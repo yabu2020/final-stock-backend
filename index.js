@@ -54,7 +54,12 @@ app.use(express.json());
 mongoose.connect(
   "mongodb+srv://yeabsiraayalew6:yabu2020@cluster0.s3vfs.mongodb.net/",
    
-);
+).then(()=>{
+  console.log("Database connected successfully");
+})
+.catch((err)=>{
+  console.error("Error connecting to MongoDB:", err);
+})
 const validatePassword = (password) => {
   // Check password length
   if (password.length < 6) {
@@ -164,7 +169,7 @@ app.post("/", async (req, res) => {
   }
 });
 app.post("/adduser", async (req, res) => {
-  const { name, phone, address, password } = req.body;
+  const { name, role,phone, address, password } = req.body;
 
   try {
     // Validate required fields
@@ -183,7 +188,8 @@ app.post("/adduser", async (req, res) => {
 
     // Create new customer
     const newUser = new EmployeeModel({
-      type: "user", // Customer type
+      type: "employee",
+      role: "user",
       name,
       phone,
       password: hashedPassword,
@@ -233,7 +239,8 @@ app.post("/signup", async (req, res) => {
 
     // Create a new user
     const newUser = new EmployeeModel({
-      role: "customer",
+      type: "employee",
+      role: "user",
       name: normalizedName, // Use the normalized name
       phone: normalizedPhone, // Use the normalized phone number
       password: hashedPassword,
@@ -421,6 +428,57 @@ app.post("/addbranch", async (req, res) => {
     res.status(500).json({ error: "Error creating branch", details: err.message });
   }
 });
+// PUT - Update a branch by ID
+app.put("/branches/:id", async (req, res) => {
+  const { id } = req.params;
+  const updateData = req.body;
+
+  console.log("Updating branch:", id);
+  console.log("With data:", updateData);
+
+  try {
+    const updatedBranch = await BranchModel.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedBranch) {
+      return res.status(404).json({ error: "Branch not found" });
+    }
+
+    res.json(updatedBranch);
+  } catch (err) {
+    console.error("Error updating branch:", err.message);
+    res.status(500).json({
+      error: "Error updating branch",
+      details: err.message,
+    });
+  }
+});
+
+// DELETE - Delete a branch by ID
+app.delete("/branches/:id", async (req, res) => {
+  const { id } = req.params;
+
+  console.log("Deleting branch with ID:", id);
+
+  try {
+    const deletedBranch = await BranchModel.findByIdAndDelete(id);
+
+    if (!deletedBranch) {
+      return res.status(404).json({ error: "Branch not found" });
+    }
+
+    res.json({ message: "Branch deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting branch:", err.message);
+    res.status(500).json({
+      error: "Error deleting branch",
+      details: err.message,
+    });
+  }
+});
+
 // Assign Branch Manager
 app.put("/assignmanager/:branchId", async (req, res) => {
   const { managerId } = req.body;
@@ -466,6 +524,64 @@ app.get("/branches", async (req, res) => {
     res.status(500).json({ error: "Error fetching branches" });
   }
 });
+
+app.get("/api/stats", async (req, res) => {
+  try {
+    // Fetch all stats in parallel
+    const [
+      totalUsers,
+      totalAdmins,
+      totalManagers,
+      totalBranches,
+      totalReports
+    ] = await Promise.all([
+      EmployeeModel.countDocuments({ role: "user" }),
+      EmployeeModel.countDocuments({ role: "admin" }),
+      EmployeeModel.countDocuments({ role: "manager" }),
+      BranchModel.countDocuments(),
+       ReportModel.countDocuments(), // Optional: if you have a ReportModel
+    ]);
+
+    // Calculate Total Employees as Admins + Managers
+    const totalEmployees = totalAdmins + totalManagers;
+
+    // Send back aggregated statistics
+    res.json({
+      totalUsers,
+      totalEmployees,
+      totalBranches,
+      totalReports,
+    });
+  } catch (err) {
+    console.error("Error fetching stats:", err);
+    res.status(500).json({ error: "Failed to fetch dashboard stats" });
+  }
+});
+
+// /api/user-breakdown
+app.get("/api/user-breakdown", async (req, res) => {
+  try {
+    const breakdown = await EmployeeModel.aggregate([
+      {
+        $group: {
+          _id: "$role",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const formattedBreakdown = breakdown.map(item => ({
+      name: item._id,
+      value: item.count
+    }));
+
+    res.json(formattedBreakdown);
+  } catch (err) {
+    console.error("Error fetching user breakdown:", err);
+    res.status(500).json({ error: "Failed to fetch breakdown" });
+  }
+});
+
 // Route to register a category
 app.post('/category', async (req, res) => {
   try {
