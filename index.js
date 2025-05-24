@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -10,7 +11,10 @@ const OrderModel = require('./model/Order');
 const ReportModel = require('./model/Report'); 
 const CategoryModel = require("./model/Category");
 const BranchModel = require("./model/Branch");
+const authenticateToken = require('./model/authenticateToken'); // Import the middleware
 const multer = require("multer");
+const jwt = require('jsonwebtoken'); // Import the jsonwebtoken library
+const jwtSecret = process.env.JWT_SECRET;
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -28,14 +32,13 @@ app.use(cors({
 }));
 app.use(bodyParser.json());
 // Ensure the "uploads/" directory exists
-const uploadDir = path.join(__dirname, "uploads"); // Define uploadDir here
+const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 // Serve static files from the "uploads/" directory
-app.use("/uploads", express.static(uploadDir)); // Use uploadDir after it's defined
-
+app.use("/uploads", express.static(uploadDir));
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -148,7 +151,8 @@ app.post("/", async (req, res) => {
   }
 
   try {
-    const user = await EmployeeModel.findOne({ name: name});
+    // Find the user by name
+    const user = await EmployeeModel.findOne({ name });
 
     if (!user) {
       return res
@@ -156,13 +160,30 @@ app.post("/", async (req, res) => {
         .json({ message: "No record found with this name" });
     }
 
+    // Compare the provided password with the hashed password in the database
     const isMatch = await bcrypt.compare(password, user.password);
 
-    if (isMatch) {
-      res.json(["good", user]);
-    } else {
-      res.status(401).json({ message: "Incorrect password" });
+    if (!isMatch) {
+      return res.status(401).json({ message: "Incorrect password" });
     }
+
+    // Generate a JWT token
+    const token = jwt.sign(
+      { _id: user._id }, // Payload: Include the user's _id in the token
+      process.env.JWT_SECRET, // Secret key for signing the token
+      { expiresIn: '1h' } // Token expiration time (e.g., 1 hour)
+    );
+
+    // Return the token and user details
+    res.json({
+      message: "Login successful",
+      token, // Include the token in the response
+      user: {
+        _id: user._id,
+        name: user.name,
+        role: user.role // Include any other relevant user details
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "An error occurred during login" });
@@ -582,6 +603,197 @@ app.get("/api/user-breakdown", async (req, res) => {
   }
 });
 
+
+// Endpoint to fetch branch manager stats
+app.get("/api/branch-manager/:branchManagerId/stats", async (req, res) => {
+  try {
+    const branchManagerId = req.params.branchManagerId;
+
+    if (!branchManagerId) {
+      return res.status(400).json({ error: "branchManagerId is required" });
+    }
+
+    const [
+      totalProducts,
+      totalOrders,
+      mostSoldProduct,
+      netIncomeAgg,
+    ] = await Promise.all([
+      ProductModel.countDocuments({ branchManagerId }),
+
+      OrderModel.countDocuments({ branchManagerId }),
+
+      ProductModel.findOne({ branchManagerId }).sort({ quantitySold: -1 }),
+
+      OrderModel.aggregate([
+        { $match: { branchManagerId } },
+        {
+          $group: {
+            _id: null,
+            netIncome: { $sum: "$totalAmount" },
+          },
+        },
+      ]),
+    ]);
+
+    const netIncome = netIncomeAgg[0]?.netIncome || 0;
+
+    const stats = [
+      {
+        title: "Orders",
+        value: totalOrders,
+        change: "+0%", // You can calculate real changes later
+        color: "blue",
+      },
+      {
+        title: "Total Products",
+        value: totalProducts,
+        change: "-0%",
+        color: "red",
+      },
+      {
+        title: "Most sold product",
+        value: mostSoldProduct ? mostSoldProduct.name : "N/A",
+        change: "+0%",
+        color: "yellow",
+      },
+      {
+        title: "Report",
+        value: `ETB ${netIncome}`,
+        change: "+0%",
+        color: "green",
+      },
+    ];
+
+    res.json({ stats });
+
+  } catch (err) {
+    console.error("Error fetching branch manager stats:", err);
+    res.status(500).json({ error: "Failed to fetch branch manager stats" });
+  }
+});
+
+
+app.get("/api/branch-manager/sales-breakdown", async (req, res) => {
+  try {
+    const branchManagerId = req.user._id;
+
+    // Fetch sales breakdown by category
+    const salesBreakdown = await OrderModel.aggregate([
+      {
+        $match: { branchManagerId },
+      },
+      {
+        $lookup: {
+          from: "products",
+          localField: "productId",
+          foreignField: "_id",
+          as: "product",
+        },
+      },
+      {
+        $unwind: "$product",
+      },
+      {
+        $group: {
+          _id: "$product.category",
+          totalSales: {
+            $sum: { $multiply: ["$quantity", "$price"] },
+          }
+                  },
+      },
+      {
+        $project: {
+          name: "$_id",
+          value: "$totalSales",
+        },
+      },
+    ]);
+
+    res.json(salesBreakdown);
+  } catch (err) {
+    console.error("Error fetching sales breakdown:", err);
+    res.status(500).json({ error: "Failed to fetch sales breakdown" });
+  }
+});
+
+app.get("/api/branch-manager/net-income", async (req, res) => {
+  try {
+    const branchManagerId = req.user._id;
+
+    // Aggregate net income by month
+    const netIncome = await OrderModel.aggregate([
+      {
+        $match: { branchManagerId },
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } }, // Group by month
+          earnings: { $sum: "$totalAmount" }, // Sum of all order amounts
+        },
+      },
+      {
+        $project: {
+          month: "$_id",
+          earnings: 1,
+          _id: 0,
+        },
+      },
+    ]);
+
+    res.json(netIncome);
+  } catch (err) {
+    console.error("Error fetching net income:", err);
+    res.status(500).json({ error: "Failed to fetch net income" });
+  }
+});
+
+app.get("/api/branch-manager/earning-by-location", async (req, res) => {
+  try {
+    const branchManagerId = req.user._id;
+
+    // Aggregate earnings by location
+    const earningsByLocation = await OrderModel.aggregate([
+      {
+        $match: { branchManagerId },
+      },
+      {
+        $group: {
+          _id: "$location", // Assuming each order has a `location` field
+          totalEarnings: { $sum: "$totalAmount" },
+        },
+      },
+      {
+        $project: {
+          country: "$_id",
+          value: "$totalEarnings",
+          _id: 0,
+        },
+      },
+    ]);
+
+    res.json(earningsByLocation);
+  } catch (err) {
+    console.error("Error fetching earnings by location:", err);
+    res.status(500).json({ error: "Failed to fetch earnings by location" });
+  }
+});
+app.get("/api/branch-manager/recent-activity", async (req, res) => {
+  try {
+    const branchManagerId = req.user._id;
+
+    // Fetch recent activity (e.g., orders or updates)
+    const recentActivity = await ActivityModel.find({ branchManagerId })
+      .sort({ createdAt: -1 }) // Sort by most recent
+      .limit(5); // Limit to 5 recent activities
+
+    res.json(recentActivity);
+  } catch (err) {
+    console.error("Error fetching recent activity:", err);
+    res.status(500).json({ error: "Failed to fetch recent activity" });
+  }
+});
+
 // Route to register a category
 app.post('/category', async (req, res) => {
   try {
@@ -630,25 +842,35 @@ app.get('/categories', async (req, res) => {
   }
 });
 // Register Product Route
-app.post("/addproduct", upload.single("image"), async (req, res) => {
+app.post("/addproduct", authenticateToken, upload.single("image"), async (req, res) => {
   try {
     const { name, purchaseprice, saleprice, description, category } = req.body;
-    const imagePath = req.file ? req.file.path : null;
+
+    // Extract branchManagerId from the authenticated user
+    const branchManagerId = req.user._id;
+
+    // Check if a file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ message: "Image is required." });
+    }
+
+    // Generate a relative path for the image
+    const imagePath = `/uploads/${req.file.filename}`;
 
     if (!name || !purchaseprice || !saleprice || !category) {
-      return res.status(400).json({ error: "Missing required fields." });
+      return res.status(400).json({ message: "Missing required fields." });
     }
 
     const purchasePrice = parseFloat(purchaseprice);
     const salePrice = parseFloat(saleprice);
 
     if (isNaN(purchasePrice) || isNaN(salePrice)) {
-      return res.status(400).json({ error: "Invalid prices." });
+      return res.status(400).json({ message: "Invalid prices." });
     }
 
     const categoryExists = await CategoryModel.findById(category);
     if (!categoryExists) {
-      return res.status(400).json({ error: "Category not found." });
+      return res.status(400).json({ message: "Category not found." });
     }
 
     const newProduct = new ProductModel({
@@ -657,6 +879,7 @@ app.post("/addproduct", upload.single("image"), async (req, res) => {
       saleprice: salePrice,
       description,
       category: categoryExists._id,
+      branchManagerId, // Include the branchManagerId here
       image: imagePath,
     });
 
@@ -664,10 +887,9 @@ app.post("/addproduct", upload.single("image"), async (req, res) => {
     res.status(201).json({ message: "Product added successfully.", product: newProduct });
   } catch (error) {
     console.error("Error adding product:", error);
-    res.status(400).json({ error: error.message });
+    res.status(400).json({ message: error.message });
   }
 });
-
 app.post("/buyproduct", async (req, res) => {
   try {
     const { productId, quantity, supplier } = req.body;
