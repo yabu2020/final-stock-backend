@@ -1128,6 +1128,7 @@ app.get("/assigned-products", async (req, res) => {
   }
 });
 
+// In your backend route (e.g., routes/reports.js)
 app.post('/reports', async (req, res) => {
   const { startDate, endDate, branchManagerId } = req.body;
 
@@ -1144,13 +1145,19 @@ app.post('/reports', async (req, res) => {
       dateOrdered: { $gte: start, $lte: end },
       branchManagerId: branchManagerId,
       status: "Confirmed",
-    }).populate('product', 'name purchaseprice saleprice quantity status');
+    }).populate({
+      path: 'product',
+      select: 'name purchaseprice saleprice quantity status'
+    });
 
     const assignments = await AssignmentModel.find({
       dateAssigned: { $gte: start, $lte: end },
       branchManagerId: branchManagerId,
-    }).populate('product', 'name purchaseprice quantity status');
-
+    }).populate({
+      path: 'product',
+      select: 'name purchaseprice saleprice quantity status'
+    });
+    // Calculate totals
     const totalSalesFromOrders = orders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
     const costPriceFromOrders = orders.reduce(
       (sum, order) => sum + ((order.product?.purchaseprice || 0) * (order.quantity || 0)),
@@ -1170,26 +1177,42 @@ app.post('/reports', async (req, res) => {
     const costPrice = costPriceFromOrders + costPriceFromAssignments;
     const profitOrLoss = totalSales - costPrice;
 
+    // Create detailed report data
+    // In your POST /reports route
     const reportData = [
       ...orders.map(order => ({
-        productName: order.product.name,
-        quantity: order.quantity,
-        totalPrice: order.totalPrice,
-        date: order.dateOrdered,
-        stockLevel: order.product.quantity,
-        status: order.product.status,
-        source: "Order",
+        product: order.product?._id,
+        name: order.product?.name || 'Unknown Product',
+        type: "Order", // Explicitly set type for orders
+        quantity: Number(order.quantity) || 0,
+        purchasePrice: Number(order.product?.purchaseprice) || 0,
+        salePrice: Number(order.product?.saleprice) || 0,
+        totalPrice: Number(order.totalPrice) || 0,
+        date: order.dateOrdered ? new Date(order.dateOrdered) : new Date(), // Ensure proper Date object
+        stockLevel: Number(order.product?.quantity) || 0,
+        status: order.product?.status || 'Available'
       })),
       ...assignments.map(assignment => ({
-        productName: assignment.product.name,
-        quantity: assignment.quantity,
-        totalPrice: assignment.totalPrice,
-        date: assignment.dateAssigned,
-        stockLevel: assignment.product.quantity,
-        status: assignment.product.status,
-        source: "Sold Product",
-      })),
+        product: assignment.product?._id,
+        name: assignment.product?.name || 'Unknown Product',
+        type: "Sale", // Explicitly set type for assignments
+        quantity: Number(assignment.quantity) || 0,
+        purchasePrice: Number(assignment.product?.purchaseprice) || 0,
+        salePrice: Number(assignment.totalPrice) / Number(assignment.quantity) || 0,
+        totalPrice: Number(assignment.totalPrice) || 0,
+        date: assignment.dateAssigned ? new Date(assignment.dateAssigned) : new Date(), // Ensure proper Date object
+        stockLevel: Number(assignment.product?.quantity) || 0,
+        status: assignment.product?.status || 'Available'
+      }))
     ];
+    
+    // Debug output to verify all fields
+    console.log("Date verification:", {
+      orderDate: orders[0]?.dateOrdered,
+      assignmentDate: assignments[0]?.dateAssigned,
+      reportDataDate: reportData[0]?.date,
+      isDate: reportData[0]?.date instanceof Date
+    });
 
     const report = new ReportModel({
       startDate,
@@ -1199,6 +1222,7 @@ app.post('/reports', async (req, res) => {
       reportData,
       branchManagerId,
     });
+
 
     await report.save();
     res.status(201).json(report);
@@ -1219,14 +1243,79 @@ app.get('/reports', async (req, res) => {
   try {
     const reports = await ReportModel.find({ branchManagerId })
       .sort({ createdAt: -1 })
-      .exec();
+      .lean(); // Use lean() for better performance
+    
+    // Ensure dates are properly formatted
+    const formattedReports = reports.map(report => ({
+      ...report,
+      reportData: report.reportData.map(item => ({
+        ...item,
+        date: item.date ? new Date(item.date).toISOString() : null,
+        // For frontend display, you might want to add:
+        formattedDate: item.date ? new Date(item.date).toLocaleDateString() : 'N/A'
+      }))
+    }));
 
-    res.json(reports);
+    res.json(formattedReports);
   } catch (error) {
     console.error("Error fetching reports:", error);
-    res.status(500).json({ error: "Error fetching reports" });
+    res.status(500).json({ 
+      error: "Error fetching reports",
+      details: error.message 
+    });
   }
 });
+// Get only reports that have been sent to admin
+app.get('/admin/reports', async (req, res) => {
+  try {
+    const reports = await ReportModel.find({ sentToAdmin: true })
+      .populate('branchManagerId', 'name email')
+      .sort({ createdAt: -1 });
+    res.json(reports);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Endpoint for branch managers to send reports to admin
+// Update the send-to-admin endpoint
+app.post('/reports/:id/send-to-admin', async (req, res) => {
+  try {
+    const report = await ReportModel.findByIdAndUpdate(
+      req.params.id,
+      { 
+        sentToAdmin: true,
+        sentAt: new Date(),
+        status: 'submitted' // If you're using status tracking
+      },
+      { new: true }
+    ).populate('branchManagerId', 'name email');
+    
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // Optional: Send notification to admin
+    // notificationService.notifyAdmin(report);
+
+    res.json({ 
+      success: true,
+      report 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// Add to your admin API
+app.post('/admin/reports/:id/comment', async (req, res) => {
+  const { comment } = req.body;
+  await ReportModel.findByIdAndUpdate(
+    req.params.id,
+    { adminNotes: comment }
+  );
+  res.json({ success: true });
+});
+
 
 // Endpoint to create an order
 app.post('/orders', async (req, res) => {
