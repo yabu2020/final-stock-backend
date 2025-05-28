@@ -125,19 +125,86 @@ app.post('/api/payments/initiate', async (req, res) => {
         first_name,
         last_name,
         tx_ref,
-        callback_url: return_url,
+        return_url,
+        callback_url: return_url, // Same as return_url
+        customization: {
+          title: "Your Store Name",
+          description: "Payment for your order"
+        }
       },
       {
         headers: {
           Authorization: 'Bearer CHASECK_TEST-z8hnOz0YewilQrzs1CSujy2KBoBXR9i6',
-        },
+          'Content-Type': 'application/json'
+        }
       }
     );
 
-    res.status(200).json({ checkout_url: response.data.data.checkout_url });
+    res.json({ checkout_url: response.data.data.checkout_url });
   } catch (error) {
     console.error(error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to initialize payment' });
+    res.status(500).json({ error: 'Payment initialization failed' });
+  }
+});
+// In your backend (index.js or similar)
+app.post('/api/payments/verify', async (req, res) => {
+  try {
+    const { tx_ref } = req.body;
+
+    if (!tx_ref) {
+      return res.status(400).json({
+        success: false,
+        error: 'Transaction reference is required'
+      });
+    }
+
+    console.log(`Verifying payment with reference: ${tx_ref}`);
+
+    // Verify with Chapa API
+    const response = await axios.get(
+      `https://api.chapa.co/v1/transaction/verify/${tx_ref}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.CHAPA_SECRET_KEY || 'CHASECK_TEST-z8hnOz0YewilQrzs1CSujy2KBoBXR9i6'}`
+        },
+        timeout: 10000 // 10 second timeout
+      }
+    );
+
+    console.log('Chapa verification response:', response.data);
+
+    if (response.data.status === 'success') {
+      return res.json({
+        success: true,
+        data: {
+          tx_ref: response.data.tx_ref,
+          amount: response.data.amount,
+          currency: response.data.currency,
+          status: response.data.status,
+          created_at: response.data.created_at
+        }
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: 'Payment not completed',
+      details: response.data
+    });
+
+  } catch (error) {
+    console.error('Payment verification error:', error);
+    
+    // Determine if the error is from Chapa or our server
+    const errorMessage = error.response?.data?.message || 
+                       error.message || 
+                       'Payment verification failed';
+
+    return res.status(500).json({
+      success: false,
+      error: errorMessage,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 app.post("/", async (req, res) => {
@@ -1319,72 +1386,72 @@ app.post('/admin/reports/:id/comment', async (req, res) => {
 
 // Endpoint to create an order
 app.post('/orders', async (req, res) => {
-  const { product, quantity, totalPrice, userId, branchManagerId, branchId } = req.body;
-
-  if (!product || !quantity || !totalPrice || !userId || !branchManagerId || !branchId) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  if (
-    !mongoose.Types.ObjectId.isValid(product) ||
-    !mongoose.Types.ObjectId.isValid(userId) ||
-    !mongoose.Types.ObjectId.isValid(branchManagerId) ||
-    !mongoose.Types.ObjectId.isValid(branchId)
-  ) {
-    return res.status(400).json({ error: "Invalid Product ID, User ID, Branch Manager ID, or Branch ID" });
-  }
-
   try {
-    const productDoc = await ProductModel.findById(product);
-    if (!productDoc) {
-      return res.status(404).json({ error: "Product not found" });
+    const { product, quantity, totalPrice, userId, branchManagerId, branchId, tx_ref } = req.body;
+
+    // Validate all required fields
+    const requiredFields = ['product', 'quantity', 'totalPrice', 'userId', 'branchManagerId', 'branchId', 'tx_ref'];
+    const missingFields = requiredFields.filter(field => !req.body[field]);
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({ 
+        error: "Missing required fields",
+        missingFields
+      });
     }
 
-    const userDoc = await EmployeeModel.findById(userId);
-    if (!userDoc) {
-      return res.status(404).json({ error: "User not found" });
+    // More comprehensive duplicate check
+    const existingOrder = await OrderModel.findOne({
+      $or: [
+        { tx_ref },
+        { 
+          product,
+          userId,
+          branchId,
+          createdAt: { $gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Orders in last 24 hours
+        }
+      ]
+    });
+    
+    if (existingOrder) {
+      return res.status(400).json({ 
+        error: "Duplicate order detected",
+        existingOrderId: existingOrder._id
+      });
     }
 
-    const branchManagerDoc = await EmployeeModel.findById(branchManagerId);
-    if (!branchManagerDoc) {
-      return res.status(404).json({ error: "Branch manager not found" });
-    }
-
-    const branchDoc = await BranchModel.findById(branchId);
-    if (!branchDoc) {
-      return res.status(404).json({ error: "Branch not found" });
-    }
-
-    if (productDoc.quantity < quantity) {
-      return res.status(400).json({ error: "Insufficient stock", remainingStock: productDoc.quantity });
-    }
-
+    // Create the order with additional validation
     const order = new OrderModel({
       product,
       quantity,
       totalPrice,
       userId,
-      branchId,
       branchManagerId,
+      branchId,
+      tx_ref,
       dateOrdered: new Date(),
-      status: 'Pending'
+      status: 'Pending',
+      paymentStatus: req.body.paymentVerified ? 'Verified' : 'Pending'
     });
 
     await order.save();
 
-
+    // Populate and return the order
     const populatedOrder = await OrderModel.findById(order._id)
       .populate('product')
-      .populate('branchId')
-      .populate('branchManagerId');
+      .populate('userId', 'name address phone')
+      .populate('branchManagerId', 'name')
+      .populate('branchId', 'branchName');
 
-    res.json(populatedOrder);
+    res.status(201).json(populatedOrder);
   } catch (error) {
     console.error("Error creating order:", error);
-    res.status(500).json({ error: "Error creating order", details: error.message });
+    res.status(500).json({
+      error: "Error creating order",
+      details: error.message,
+    });
   }
 });
-
 // Endpoint to get all orders
 app.get("/orders", (req, res) => {
   const { userId } = req.query;
