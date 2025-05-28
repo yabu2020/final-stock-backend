@@ -1203,99 +1203,107 @@ app.post('/reports', async (req, res) => {
     return res.status(400).json({ error: 'Start date, end date, and branch manager ID are required' });
   }
 
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999);
-
   try {
+    // Convert to start and end of day in local timezone
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    console.log(`Querying between: ${start} and ${end}`);
+
+    // Find orders - remove status filter temporarily for debugging
     const orders = await OrderModel.find({
       dateOrdered: { $gte: start, $lte: end },
       branchManagerId: branchManagerId,
-      status: "Confirmed",
-    }).populate({
-      path: 'product',
-      select: 'name purchaseprice saleprice quantity status'
-    });
+      // status: "Confirmed", // Removed for debugging
+    }).populate('product').lean();
 
+    console.log(`Found ${orders.length} orders`);
+    console.log('Sample order:', orders.length > 0 ? orders[0] : null);
+
+    // Find assignments
     const assignments = await AssignmentModel.find({
       dateAssigned: { $gte: start, $lte: end },
       branchManagerId: branchManagerId,
-    }).populate({
-      path: 'product',
-      select: 'name purchaseprice saleprice quantity status'
-    });
-    // Calculate totals
-    const totalSalesFromOrders = orders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
-    const costPriceFromOrders = orders.reduce(
-      (sum, order) => sum + ((order.product?.purchaseprice || 0) * (order.quantity || 0)),
-      0
-    );
+    }).populate('product').lean();
 
-    const totalSalesFromAssignments = assignments.reduce(
-      (sum, assignment) => sum + (assignment.totalPrice || 0),
-      0
-    );
-    const costPriceFromAssignments = assignments.reduce(
-      (sum, assignment) => sum + ((assignment.product?.purchaseprice || 0) * (assignment.quantity || 0)),
-      0
-    );
+    console.log(`Found ${assignments.length} assignments`);
+    console.log('Sample assignment:', assignments.length > 0 ? assignments[0] : null);
 
-    const totalSales = totalSalesFromOrders + totalSalesFromAssignments;
-    const costPrice = costPriceFromOrders + costPriceFromAssignments;
-    const profitOrLoss = totalSales - costPrice;
-
-    // Create detailed report data
-    // In your POST /reports route
+    // Process data
     const reportData = [
       ...orders.map(order => ({
         product: order.product?._id,
         name: order.product?.name || 'Unknown Product',
-        type: "Order", // Explicitly set type for orders
+        type: "Order",
         quantity: Number(order.quantity) || 0,
         purchasePrice: Number(order.product?.purchaseprice) || 0,
         salePrice: Number(order.product?.saleprice) || 0,
         totalPrice: Number(order.totalPrice) || 0,
-        date: order.dateOrdered ? new Date(order.dateOrdered) : new Date(), // Ensure proper Date object
+        date: order.dateOrdered,
         stockLevel: Number(order.product?.quantity) || 0,
         status: order.product?.status || 'Available'
       })),
       ...assignments.map(assignment => ({
         product: assignment.product?._id,
         name: assignment.product?.name || 'Unknown Product',
-        type: "Sale", // Explicitly set type for assignments
+        type: "Sale",
         quantity: Number(assignment.quantity) || 0,
         purchasePrice: Number(assignment.product?.purchaseprice) || 0,
-        salePrice: Number(assignment.totalPrice) / Number(assignment.quantity) || 0,
+        salePrice: assignment.quantity > 0 
+          ? Number(assignment.totalPrice) / Number(assignment.quantity)
+          : 0,
         totalPrice: Number(assignment.totalPrice) || 0,
-        date: assignment.dateAssigned ? new Date(assignment.dateAssigned) : new Date(), // Ensure proper Date object
+        date: assignment.dateAssigned,
         stockLevel: Number(assignment.product?.quantity) || 0,
         status: assignment.product?.status || 'Available'
       }))
     ];
-    
-    // Debug output to verify all fields
-    console.log("Date verification:", {
-      orderDate: orders[0]?.dateOrdered,
-      assignmentDate: assignments[0]?.dateAssigned,
-      reportDataDate: reportData[0]?.date,
-      isDate: reportData[0]?.date instanceof Date
-    });
+
+    if (reportData.length === 0) {
+      return res.status(404).json({ 
+        error: 'No sales data found for the selected date range',
+        query: {
+          startDate: start,
+          endDate: end,
+          branchManagerId
+        },
+        counts: {
+          orders: orders.length,
+          assignments: assignments.length
+        }
+      });
+    }
+
+    // Calculate totals
+    const totalSales = reportData.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+    const costPrice = reportData.reduce(
+      (sum, item) => sum + ((item.purchasePrice || 0) * (item.quantity || 0)), 
+      0
+    );
+    const profitOrLoss = totalSales - costPrice;
 
     const report = new ReportModel({
-      startDate,
-      endDate,
+      startDate: start,
+      endDate: end,
       totalSales,
       profitOrLoss,
       reportData,
       branchManagerId,
     });
 
-
     await report.save();
     res.status(201).json(report);
+
   } catch (error) {
     console.error("Error generating report:", error);
-    res.status(500).json({ error: "Error generating report", details: error.message });
+    res.status(500).json({ 
+      error: "Error generating report", 
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
@@ -1510,6 +1518,7 @@ app.get("/admin/orders", async (req, res) => {
 });
 
 // Confirm an order
+// Confirm an order
 app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -1520,13 +1529,27 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
+    // Prevent confirming already processed orders
+    if (order.status === 'Confirmed') {
+      return res.status(400).json({ error: "Order is already confirmed" });
+    }
+    if (order.status === 'Rejected') {
+      return res.status(400).json({ error: "Cannot confirm a rejected order" });
+    }
+
     if (!order.product) {
       return res.status(400).json({ error: "Product not found for this order" });
     }
 
     // Check if there is sufficient stock
     if (order.product.quantity < order.quantity) {
-      return res.status(400).json({ error: "Insufficient stock" });
+      return res.status(400).json({ 
+        error: "Insufficient stock",
+        details: {
+          available: order.product.quantity,
+          requested: order.quantity
+        }
+      });
     }
 
     // Reduce the product stock
@@ -1543,15 +1566,22 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
 
     // Confirm the order
     order.status = 'Confirmed';
+    order.confirmedAt = new Date(); // Track when it was confirmed
     await order.save();
 
     // Fetch the updated order with populated fields
-    const updatedOrder = await OrderModel.findById(order._id).populate('userId product');
+    const updatedOrder = await OrderModel.findById(order._id)
+      .populate('userId', 'name address phone')
+      .populate('product');
 
     res.json(updatedOrder);
   } catch (error) {
     console.error("Error confirming order:", error.message, error.stack);
-    res.status(500).json({ error: "Error confirming order", details: error.message });
+    res.status(500).json({ 
+      error: "Error confirming order", 
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
@@ -1563,6 +1593,11 @@ app.patch('/admin/orders/:orderId/reject', async (req, res) => {
     const order = await OrderModel.findById(orderId).populate('product');
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Prevent rejecting already processed orders
+    if (order.status === 'Rejected') {
+      return res.status(400).json({ error: "Order is already rejected" });
     }
 
     // If the order was confirmed, restore the product stock
@@ -1581,17 +1616,25 @@ app.patch('/admin/orders/:orderId/reject', async (req, res) => {
 
     // Update the order status to "Rejected"
     order.status = 'Rejected';
+    order.rejectedAt = new Date(); // Track when it was rejected
     await order.save();
 
     // Fetch the updated order with populated fields
-    const updatedOrder = await OrderModel.findById(order._id).populate('userId product');
+    const updatedOrder = await OrderModel.findById(order._id)
+      .populate('userId', 'name address phone')
+      .populate('product');
 
     res.json(updatedOrder);
   } catch (error) {
     console.error("Error rejecting order:", error);
-    res.status(500).json({ error: "Error rejecting order", details: error.message });
+    res.status(500).json({ 
+      error: "Error rejecting order", 
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
+
 
 // In your Express server (e.g., index.js or server.js)
 app.get('/current_user', (req, res) => {
