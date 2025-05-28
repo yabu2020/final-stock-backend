@@ -385,31 +385,80 @@ app.delete("/users/:id", (req, res) => {
     );
 });
 // Update user endpoint
-app.put("/users/:id", (req, res) => {
-  const { id } = req.params;
-  const { role, name, email, password, department } = req.body;
+app.put("/users/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, address } = req.body;
 
-  // Prepare the update object
-  const updateFields = { role, name, email, password, department };
-  // Use the findByIdAndUpdate method to update the document
-  EmployeeModel.findByIdAndUpdate(id, updateFields, { new: true })
-    .then((updatedUser) => {
-      if (!updatedUser) {
-        return res.status(404).json({ message: "User not found" });
+    // Validate required fields
+    if (!name || !phone || !address) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, phone, and address are required"
+      });
+    }
+
+    // Address must contain at least one letter (not just numbers or symbols)
+    const hasLetters = /[a-zA-Z]/.test(address);
+    if (!hasLetters) {
+      return res.status(400).json({
+        success: false,
+        message: "Address must include letters"
+      });
+    }
+
+    const updatedUser = await EmployeeModel.findByIdAndUpdate(
+      id,
+      { name, phone, address },
+      {
+        new: true,
+        runValidators: true
       }
-      res.json(updatedUser);
-    })
-    .catch((err) => {
-      if (err.code === 11000) {
-        // Handle duplicate key error
-        res.status(400).json({ error: "Duplicate id or email" });
-      } else {
-        res
-          .status(500)
-          .json({ message: "Error updating user", error: err.message });
-      }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      user: updatedUser,
+      message: "Profile updated successfully"
     });
+  } catch (err) {
+    console.error("Update error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error updating user",
+      error: err.message
+    });
+  }
 });
+
+
+// Add this to your backend
+// Backend
+app.get("/users/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const user = await EmployeeModel.findById(req.params.id)
+      .select('-password') // Exclude password
+      .lean(); // Convert to plain JavaScript object
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
 // Get all employees
 app.get("/employees", async (req, res) => {
   try {
@@ -669,74 +718,227 @@ app.get("/api/user-breakdown", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch breakdown" });
   }
 });
+// Add to your backend routes
+app.get("/api/revenue-stats", async (req, res) => {
+  try {
+    // Get current year
+    const currentYear = new Date().getFullYear();
+    
+    // Aggregate monthly revenue data
+    const monthlyRevenue = await OrderModel.aggregate([
+      {
+        $match: {
+          status: "Confirmed", // Only confirmed orders
+          dateOrdered: {
+            $gte: new Date(`${currentYear}-01-01`),
+            $lte: new Date(`${currentYear}-12-31`)
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: "$dateOrdered" },
+          totalRevenue: { $sum: "$totalPrice" }
+        }
+      },
+      {
+        $project: {
+          month: "$_id",
+          revenue: "$totalRevenue",
+          _id: 0
+        }
+      },
+      {
+        $sort: { month: 1 }
+      }
+    ]);
+
+    // Format month names
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    
+    const formattedRevenue = monthlyRevenue.map(item => ({
+      month: monthNames[item.month - 1],
+      revenue: item.revenue
+    }));
+
+    // Fill in missing months with 0 revenue
+    const completeRevenue = monthNames.map((month, index) => {
+      const found = formattedRevenue.find(item => item.month === month);
+      return found || { month, revenue: 0 };
+    });
+
+    res.json(completeRevenue);
+  } catch (err) {
+    console.error("Error fetching revenue stats:", err);
+    res.status(500).json({ error: "Failed to fetch revenue stats" });
+  }
+});
+
+app.get("/api/admin/reports", async (req, res) => {
+  try {
+    const reports = await ReportModel.find({ 
+      sentToAdmin: true 
+    })
+    .sort({ sentAt: -1 })
+    .populate('branchManagerId', 'name email');
+    
+    res.json(reports);
+  } catch (err) {
+    console.error("Error fetching admin reports:", err);
+    res.status(500).json({ error: "Failed to fetch reports" });
+  }
+});
 
 
 // Endpoint to fetch branch manager stats
-app.get("/api/branch-manager/:branchManagerId/stats", async (req, res) => {
+// Get manager-specific stats
+app.get('/api/manager/stats', async (req, res) => {
   try {
-    const branchManagerId = req.params.branchManagerId;
-
-    if (!branchManagerId) {
-      return res.status(400).json({ error: "branchManagerId is required" });
+    const { managerId } = req.query;
+    
+    if (!managerId) {
+      return res.status(400).json({ error: 'Manager ID is required' });
     }
 
+    // Get current date ranges
+    const today = new Date();
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const startOfYear = new Date(today.getFullYear(), 0, 1);
+
+    // Get manager's branch
+    const branch = await BranchModel.findOne({ manager: managerId });
+    if (!branch) {
+      return res.status(404).json({ error: 'Branch not found for this manager' });
+    }
+
+    // Run all queries in parallel
     const [
-      totalProducts,
       totalOrders,
-      mostSoldProduct,
-      netIncomeAgg,
+      totalRevenue,
+      popularProduct,
+      totalReports,
+      monthlyEarnings,
+      salesBreakdown
     ] = await Promise.all([
-      ProductModel.countDocuments({ branchManagerId }),
+      // Total orders this month
+      OrderModel.countDocuments({
+        branchId: branch._id,
+        status: 'Confirmed',
+        dateOrdered: { $gte: startOfMonth }
+      }),
 
-      OrderModel.countDocuments({ branchManagerId }),
-
-      ProductModel.findOne({ branchManagerId }).sort({ quantitySold: -1 }),
-
+      // Total revenue this month
       OrderModel.aggregate([
-        { $match: { branchManagerId } },
+        {
+          $match: {
+            branchId: branch._id,
+            status: 'Confirmed',
+            dateOrdered: { $gte: startOfMonth }
+          }
+        },
         {
           $group: {
             _id: null,
-            netIncome: { $sum: "$totalAmount" },
-          },
-        },
+            total: { $sum: '$totalPrice' }
+          }
+        }
       ]),
+
+      // Most popular product
+      OrderModel.aggregate([
+        {
+          $match: {
+            branchId: branch._id,
+            status: 'Confirmed',
+            dateOrdered: { $gte: startOfYear }
+          }
+        },
+        {
+          $group: {
+            _id: '$product',
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 1 },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'product'
+          }
+        },
+        { $unwind: '$product' }
+      ]),
+
+      // Total reports submitted
+      ReportModel.countDocuments({
+        branchManagerId: managerId,
+        sentToAdmin: true
+      }),
+
+      // Monthly earnings for the year
+      OrderModel.aggregate([
+        {
+          $match: {
+            branchId: branch._id,
+            status: 'Confirmed',
+            dateOrdered: { $gte: startOfYear }
+          }
+        },
+        {
+          $group: {
+            _id: { $month: '$dateOrdered' },
+            earnings: { $sum: '$totalPrice' }
+          }
+        },
+        { $sort: { '_id': 1 } }
+      ]),
+
+      // Sales breakdown by type
+      OrderModel.aggregate([
+        {
+          $match: {
+            branchId: branch._id,
+            status: 'Confirmed',
+            dateOrdered: { $gte: startOfYear }
+          }
+        },
+        {
+          $group: {
+            _id: '$salesType',
+            value: { $sum: '$totalPrice' }
+          }
+        }
+      ])
     ]);
 
-    const netIncome = netIncomeAgg[0]?.netIncome || 0;
+    // Format response
+    res.json({
+      stats: {
+        orders: totalOrders,
+        revenue: totalRevenue[0]?.total || 0,
+        popularProduct: popularProduct[0]?.product?.name || 'N/A',
+        popularProductCount: popularProduct[0]?.count || 0,
+        reports: totalReports
+      },
+      monthlyEarnings: monthlyEarnings.map(item => ({
+        month: item._id,
+        earnings: item.earnings
+      })),
+      salesBreakdown: salesBreakdown.map(item => ({
+        name: item._id || 'Direct',
+        value: item.value,
+        color: item._id === 'referral' ? '#fbb6ce' : 
+               item._id === 'affiliate' ? '#fcd34d' : '#90cdf4'
+      }))
+    });
 
-    const stats = [
-      {
-        title: "Orders",
-        value: totalOrders,
-        change: "+0%", // You can calculate real changes later
-        color: "blue",
-      },
-      {
-        title: "Total Products",
-        value: totalProducts,
-        change: "-0%",
-        color: "red",
-      },
-      {
-        title: "Most sold product",
-        value: mostSoldProduct ? mostSoldProduct.name : "N/A",
-        change: "+0%",
-        color: "yellow",
-      },
-      {
-        title: "Report",
-        value: `ETB ${netIncome}`,
-        change: "+0%",
-        color: "green",
-      },
-    ];
-
-    res.json({ stats });
-
-  } catch (err) {
-    console.error("Error fetching branch manager stats:", err);
-    res.status(500).json({ error: "Failed to fetch branch manager stats" });
+  } catch (error) {
+    console.error('Error fetching manager stats:', error);
+    res.status(500).json({ error: 'Failed to fetch manager dashboard data' });
   }
 });
 
