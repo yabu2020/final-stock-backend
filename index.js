@@ -248,7 +248,9 @@ app.post("/", async (req, res) => {
       user: {
         _id: user._id,
         name: user.name,
-        role: user.role // Include any other relevant user details
+        role: user.role, // Include any other relevant user details
+        phone: user.phone,
+        address: user.address
       }
     });
   } catch (err) {
