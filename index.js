@@ -295,21 +295,44 @@ app.post("/adduser", async (req, res) => {
     }
   }
 });
+
+function isLettersOnly(str) {
+  return /^[A-Za-z\s]+$/.test(str);
+}
+
+function isValidPhone(phone) {
+  return /^(09|07)\d{8}$/.test(phone);
+}
+
+function isValidAddress(address) {
+  return /[A-Za-z]/.test(address); // Must contain at least one letter
+}
+
+
+
 // Signup route
 app.post("/signup", async (req, res) => {
   const { name, phone, password, address } = req.body;
 
   try {
-    // Normalize inputs
     const normalizedPhone = phone.trim().toLowerCase();
     const normalizedName = name.trim().toLowerCase();
 
-    // Validate password
+    // Server-side validation
+    if (!isLettersOnly(normalizedName)) {
+      return res.status(400).json({ error: "Name must contain letters only" });
+    }
+    if (!isValidPhone(normalizedPhone)) {
+      return res.status(400).json({ error: "Phone number must start with 09 or 07 and be 10 digits long" });
+    }
+    if (!isValidAddress(address)) {
+      return res.status(400).json({ error: "Address must contain letters" });
+    }
+
     const passwordError = validatePassword(password);
     if (passwordError) {
       return res.status(400).json({ error: passwordError });
     }
-
     // Check if the name is already registered
     const userWithName = await EmployeeModel.findOne({ name: normalizedName });
     if (userWithName) {
