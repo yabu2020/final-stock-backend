@@ -593,7 +593,13 @@ app.post("/addbranch", async (req, res) => {
 // PUT - Update a branch by ID
 app.put("/branches/:id", async (req, res) => {
   const { id } = req.params;
-  const updateData = req.body;
+let updateData = req.body;
+
+// If managerId is sent, rename it to `manager`
+if (updateData.managerId) {
+  updateData.manager = updateData.managerId;
+  delete updateData.managerId;
+}
 
   console.log("Updating branch:", id);
   console.log("With data:", updateData);
@@ -1188,7 +1194,7 @@ app.post("/buyproduct", async (req, res) => {
   try {
     const { productId, quantity, supplier } = req.body;
 
-    if (!productId || !quantity || !supplier) {
+    if (!productId || !quantity ) {
       return res.status(400).json({ error: "Missing required fields." });
     }
 
