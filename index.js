@@ -1094,7 +1094,28 @@ app.get("/api/branch-manager/recent-activity", async (req, res) => {
   }
 });
 
-// Route to register a category
+// Add this route to check code uniqueness
+app.get('/check-code', async (req, res) => {
+  try {
+    const { code, branchManagerId } = req.query;
+    
+    if (!code || !branchManagerId) {
+      return res.status(400).json({ error: 'Code and branchManagerId are required' });
+    }
+
+    const existingCategory = await CategoryModel.findOne({ 
+      code,
+      branchManagerId 
+    });
+
+    res.json({ exists: !!existingCategory });
+  } catch (error) {
+    console.error('Error checking code:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Existing category route
 app.post('/category', async (req, res) => {
   try {
     const { code, description, category, branchManagerId } = req.body;
@@ -1104,12 +1125,27 @@ app.post('/category', async (req, res) => {
       return res.status(400).json({ error: 'Invalid or missing branch manager ID.' });
     }
 
+    // Check if code already exists (double check)
+    const existingCategory = await CategoryModel.findOne({ 
+      code,
+      branchManagerId 
+    });
+
+    if (existingCategory) {
+      return res.status(400).json({ error: 'This code already exists' });
+    }
+
+    // Validate category name
+    if (/^\d+$/.test(category)) {
+      return res.status(400).json({ error: 'Category cannot be only numbers' });
+    }
+
     // Create a new category document
     const newCategory = new CategoryModel({
       code,
       description,
       category,
-      branchManagerId, // Associate the category with the branch manager
+      branchManagerId,
     });
 
     // Save the category to the database
@@ -1117,7 +1153,7 @@ app.post('/category', async (req, res) => {
 
     res.status(201).json({ message: 'Category registered successfully.' });
   } catch (error) {
-    console.error('Error registering category:', error); // Log the error for debugging
+    console.error('Error registering category:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1942,48 +1978,76 @@ app.post('/validate-security', async (req, res) => {
 
 // Route to get the security question for a user by email
 app.get('/security-question', async (req, res) => {
-  const { userId } = req.query; // Get the userId from query parameters
+  const { userId } = req.query;
+
+  console.log("Received request for userId:", userId); // Add this
 
   if (!userId) {
-    return res.status(400).json({ message: 'User ID is required' });
+    console.log("No userId provided");
+    return res.status(400).json({ error: 'User ID is required' });
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    console.log("Invalid userId format:", userId);
+    return res.status(400).json({ error: 'Invalid user ID format' });
   }
 
   try {
-    const user = await EmployeeModel.findById(userId).select('securityQuestion securityAnswer');
+    const user = await EmployeeModel.findById(userId, 'securityQuestion securityAnswer role');
+    
     if (!user) {
+      console.log("User not found for ID:", userId);
       return res.status(404).json({ message: 'User not found' });
     }
 
+    console.log("Found user:", user); // Add this
     res.json({
-      securityQuestion: user.securityQuestion || 'No current security question',
-      securityAnswer: user.securityAnswer || ''
+      securityQuestion: user.securityQuestion || 'No security question set',
+      securityAnswer: user.securityAnswer || '',
+      role: user.role // Return role for debugging
     });
   } catch (error) {
-    console.error('Error fetching security question:', error);
-    res.status(500).json({ error: 'Server error', details: error.message });
+    console.error('Database error:', error);
+    res.status(500).json({ error: 'Server error' });
   }
 });
-
 app.post('/update-security-question', async (req, res) => {
   const { userId, newSecurityQuestion, newSecurityAnswer } = req.body;
 
+  // Validate input
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ error: 'Invalid user ID' });
+  }
+
+  if (!newSecurityQuestion || !newSecurityAnswer) {
+    return res.status(400).json({ error: 'Question and answer are required' });
+  }
+
   try {
+    // Find user in EmployeeModel regardless of role
     const user = await EmployeeModel.findById(userId);
+    
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // Update security fields
     user.securityQuestion = newSecurityQuestion;
     user.securityAnswer = newSecurityAnswer;
     await user.save();
 
-    res.json({ success: true });
+    res.json({ 
+      success: true,
+      message: 'Security question updated successfully'
+    });
   } catch (error) {
     console.error('Error updating security question:', error);
-    res.status(500).json({ error: 'Server error', details: error.message });
+    res.status(500).json({ 
+      error: 'Server error',
+      details: error.message 
+    });
   }
 });
-
 // Route to reset the password
 app.post('/reset-password', async (req, res) => {
   const { name, securityAnswer, newPassword } = req.body;
