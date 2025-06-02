@@ -25,14 +25,14 @@ const reportSchema = new mongoose.Schema({
       purchasePrice: Number,
       salePrice: Number,
       totalPrice: Number,
-      date: { type: Date, required: true }, // Unified date field
+      date: { type: Date, required: true }, 
       stockLevel: Number,
       status: {
         type: String,
         enum: ['Available', 'Low Stock', 'Out Of Stock'],
         default: 'Available'
       },
-      type: { type: String, enum: ['Order', 'Sale'], required: true } // Added type field
+      type: { type: String, enum: ['Order', 'Sale'], required: true } 
     }
   ],
   branchManagerId: {
@@ -44,7 +44,6 @@ const reportSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-  // In your Report model
 status: {
   type: String,
   enum: ['draft', 'submitted', 'reviewed', 'approved'],
@@ -57,7 +56,6 @@ status: {
   adminNotes: String,
 });
 
-// Add middleware to handle date conversion
 reportSchema.post('init', function(doc) {
   if (doc.reportData) {
     doc.reportData.forEach(item => {

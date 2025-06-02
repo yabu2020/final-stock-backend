@@ -3,7 +3,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const bcrypt = require("bcrypt"); // For hashing passwords
+const bcrypt = require("bcrypt"); 
 const EmployeeModel = require("./model/Employee");
 const ProductModel = require("./model/Product");
 const AssignmentModel = require("./model/Assignment");
@@ -11,9 +11,9 @@ const OrderModel = require('./model/Order');
 const ReportModel = require('./model/Report'); 
 const CategoryModel = require("./model/Category");
 const BranchModel = require("./model/Branch");
-const authenticateToken = require('./model/authenticateToken'); // Import the middleware
+const authenticateToken = require('./model/authenticateToken'); 
 const multer = require("multer");
-const jwt = require('jsonwebtoken'); // Import the jsonwebtoken library
+const jwt = require('jsonwebtoken'); 
 const jwtSecret = process.env.JWT_SECRET;
 const fs = require("fs");
 const path = require("path");
@@ -27,31 +27,26 @@ const normalizename = (name) => name.trim().toLowerCase();
 
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:5173',  // your frontend
-  credentials: true,                // allow cookies
+  origin: 'http://localhost:5173',  
+  credentials: true,                
 }));
 app.use(bodyParser.json());
-// Ensure the "uploads/" directory exists
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Serve static files from the "uploads/" directory
 app.use("/uploads", express.static(uploadDir));
-// Configure Multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir); // Use uploadDir here
+    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`); // Rename the file to avoid conflicts
+    cb(null, `${Date.now()}-${file.originalname}`); 
   },
 });
 
 const upload = multer({ storage });
-
-// Middleware to parse JSON
 app.use(express.json());
 
 mongoose.connect(
@@ -64,12 +59,9 @@ mongoose.connect(
   console.error("Error connecting to MongoDB:", err);
 })
 const validatePassword = (password) => {
-  // Check password length
   if (password.length < 6) {
     return "Password must be at least 6 characters long";
   }
-
-  // Check password complexity: at least one letter and one number
   const complexityRe = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{6,}$/;
   if (!complexityRe.test(password)) {
     return "Password must contain at least one letter and one number";
@@ -112,6 +104,7 @@ app.post("/api/pay", async (req, res) => {
     res.status(500).json({ error: "Payment initialization failed" });
   }
 });
+
 app.post('/api/payments/initiate', async (req, res) => {
   const { amount, email, first_name, last_name, tx_ref, return_url } = req.body;
 
@@ -126,7 +119,7 @@ app.post('/api/payments/initiate', async (req, res) => {
         last_name,
         tx_ref,
         return_url,
-        callback_url: return_url, // Same as return_url
+        callback_url: return_url, 
         customization: {
           title: "Your Store Name",
           description: "Payment for your order"
@@ -146,7 +139,7 @@ app.post('/api/payments/initiate', async (req, res) => {
     res.status(500).json({ error: 'Payment initialization failed' });
   }
 });
-// In your backend (index.js or similar)
+
 app.post('/api/payments/verify', async (req, res) => {
   try {
     const { tx_ref } = req.body;
@@ -160,14 +153,13 @@ app.post('/api/payments/verify', async (req, res) => {
 
     console.log(`Verifying payment with reference: ${tx_ref}`);
 
-    // Verify with Chapa API
     const response = await axios.get(
       `https://api.chapa.co/v1/transaction/verify/${tx_ref}`,
       {
         headers: {
           Authorization: `Bearer ${process.env.CHAPA_SECRET_KEY || 'CHASECK_TEST-z8hnOz0YewilQrzs1CSujy2KBoBXR9i6'}`
         },
-        timeout: 10000 // 10 second timeout
+        timeout: 10000 
       }
     );
 
@@ -194,9 +186,7 @@ app.post('/api/payments/verify', async (req, res) => {
 
   } catch (error) {
     console.error('Payment verification error:', error);
-    
-    // Determine if the error is from Chapa or our server
-    const errorMessage = error.response?.data?.message || 
+        const errorMessage = error.response?.data?.message || 
                        error.message || 
                        'Payment verification failed';
 
@@ -207,6 +197,7 @@ app.post('/api/payments/verify', async (req, res) => {
     });
   }
 });
+
 app.post("/", async (req, res) => {
   const { name, password } = req.body;
 
@@ -218,7 +209,6 @@ app.post("/", async (req, res) => {
   }
 
   try {
-    // Find the user by name
     const user = await EmployeeModel.findOne({ name });
 
     if (!user) {
@@ -226,29 +216,24 @@ app.post("/", async (req, res) => {
         .status(404)
         .json({ message: "No record found with this name" });
     }
-
-    // Compare the provided password with the hashed password in the database
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
       return res.status(401).json({ message: "Incorrect password" });
     }
-
-    // Generate a JWT token
     const token = jwt.sign(
-      { _id: user._id }, // Payload: Include the user's _id in the token
-      process.env.JWT_SECRET, // Secret key for signing the token
-      { expiresIn: '1h' } // Token expiration time (e.g., 1 hour)
+      { _id: user._id }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '1h' } 
     );
 
-    // Return the token and user details
     res.json({
       message: "Login successful",
-      token, // Include the token in the response
+      token, 
       user: {
         _id: user._id,
         name: user.name,
-        role: user.role, // Include any other relevant user details
+        role: user.role, 
         phone: user.phone,
         address: user.address
       }
@@ -262,21 +247,14 @@ app.post("/adduser", async (req, res) => {
   const { name, role,phone, address, password } = req.body;
 
   try {
-    // Validate required fields
     if (!name || !phone || !address || !password) {
       return res.status(400).json({ error: "All fields are required" });
     }
-
-    // Check for duplicate phone
     const existingUser = await EmployeeModel.findOne({ phone });
     if (existingUser) {
       return res.status(400).json({ error: "Duplicate phone" });
     }
-
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create new customer
     const newUser = new EmployeeModel({
       type: "employee",
       role: "user",
@@ -307,12 +285,11 @@ function isValidPhone(phone) {
 }
 
 function isValidAddress(address) {
-  return /[A-Za-z]/.test(address); // Must contain at least one letter
+  return /[A-Za-z]/.test(address); 
 }
 
 
 
-// Signup route
 app.post("/signup", async (req, res) => {
   const { name, phone, password, address } = req.body;
 
@@ -320,7 +297,6 @@ app.post("/signup", async (req, res) => {
     const normalizedPhone = phone.trim().toLowerCase();
     const normalizedName = name.trim().toLowerCase();
 
-    // Server-side validation
     if (!isLettersOnly(normalizedName)) {
       return res.status(400).json({ error: "Name must contain letters only" });
     }
@@ -335,38 +311,31 @@ app.post("/signup", async (req, res) => {
     if (passwordError) {
       return res.status(400).json({ error: passwordError });
     }
-    // Check if the name is already registered
     const userWithName = await EmployeeModel.findOne({ name: normalizedName });
     if (userWithName) {
       return res.status(400).json({ error: "User with this name is already registered" });
     }
-
-    // Check if the phone number is already registered
     const userWithPhone = await EmployeeModel.findOne({ phone: normalizedPhone });
     if (userWithPhone) {
       return res.status(400).json({ error: "Phone number is already registered" });
     }
 
-    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create a new user
     const newUser = new EmployeeModel({
       type: "employee",
       role: "user",
-      name: normalizedName, // Use the normalized name
-      phone: normalizedPhone, // Use the normalized phone number
+      name: normalizedName, 
+      phone: normalizedPhone, 
       password: hashedPassword,
       address,
     });
 
-    // Save the user to the database
     const savedUser = await newUser.save();
     res.json(savedUser);
   } catch (err) {
     console.error("Error during signup:", err);
     if (err.code === 11000) {
-      // Handle unique constraint violations (shouldn't happen due to checks above)
       res.status(400).json({ error: "Duplicate entry for name or phone number" });
     } else {
       res.status(500).json({ error: "Error signing up" });
@@ -376,12 +345,12 @@ app.post("/signup", async (req, res) => {
 
 
 app.get("/users", async (req, res) => {
-  const { type } = req.query; // Optional query parameter
+  const { type } = req.query; 
 
   try {
     let query = {};
     if (type) {
-      query.type = type; // Filter by type (employee or customer)
+      query.type = type; 
     }
 
     const users = await EmployeeModel.find(query, "name role phone address");
@@ -393,7 +362,6 @@ app.get("/users", async (req, res) => {
 
 
 
-// Delete user endpoint
 app.delete("/users/:id", (req, res) => {
   const { id } = req.params;
   EmployeeModel.findByIdAndDelete(id)
@@ -409,21 +377,18 @@ app.delete("/users/:id", (req, res) => {
         .json({ message: "Error deleting user", error: err.message })
     );
 });
-// Update user endpoint
+
 app.put("/users/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { name, phone, address } = req.body;
 
-    // Validate required fields
     if (!name || !phone || !address) {
       return res.status(400).json({
         success: false,
         message: "Name, phone, and address are required"
       });
     }
-
-    // Address must contain at least one letter (not just numbers or symbols)
     const hasLetters = /[a-zA-Z]/.test(address);
     if (!hasLetters) {
       return res.status(400).json({
@@ -464,14 +429,13 @@ app.put("/users/:id", async (req, res) => {
 });
 
 
-// Add this to your backend
-// Backend
+
 app.get("/users/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const user = await EmployeeModel.findById(req.params.id)
-      .select('-password') // Exclude password
-      .lean(); // Convert to plain JavaScript object
+      .select('-password') 
+      .lean(); 
     
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -484,7 +448,6 @@ app.get("/users/:id", async (req, res) => {
 });
 
 
-// Get all employees
 app.get("/employees", async (req, res) => {
   try {
     const employees = await EmployeeModel.find({ type: "employee" }, "name role phone address");
@@ -494,38 +457,31 @@ app.get("/employees", async (req, res) => {
   }
 });
 
-// Add a new employee
 app.post("/addemployee", async (req, res) => {
   const { role, name, phone, address, password } = req.body;
 
-  // Validate role
   if (!["user", "Admin", "manager", "asset approver"].includes(role)) {
     return res.status(400).json({ error: "Invalid role" });
   }
 
-  // Validate password
   if (!password) {
     return res.status(400).json({ error: "Password is required" });
   }
 
   try {
-    // Check for duplicate name
     const existingEmployee = await EmployeeModel.findOne({ name });
     if (existingEmployee) {
       return res.status(400).json({ error: "Employee is already registered with this name" });
     }
-
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create new employee
     const newEmployee = new EmployeeModel({
       type: "employee",
       role,
       name,
       phone,
       address,
-      password: hashedPassword, // Save hashed password
+      password: hashedPassword,
     });
 
     const savedEmployee = await newEmployee.save();
@@ -540,7 +496,7 @@ app.post("/addemployee", async (req, res) => {
   }
 });
 
-// Delete an employee
+
 app.delete("/employees/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -554,29 +510,23 @@ app.delete("/employees/:id", async (req, res) => {
     res.status(500).json({ error: "Error deleting employee" });
   }
 });
-// Create Branch
+
+
 app.post("/addbranch", async (req, res) => {
   const { branchName, location, managerId } = req.body;
 
   try {
-    // Validate required fields
     if (!branchName || !location || !managerId) {
       return res.status(400).json({ error: "Branch name, location, and manager are required" });
     }
-
-    // Check for duplicate branch names
     const existingBranch = await BranchModel.findOne({ branchName });
     if (existingBranch) {
       return res.status(400).json({ error: "Branch already exists" });
     }
-
-    // Check if the manager is already assigned to another branch
     const existingManagerAssignment = await BranchModel.findOne({ manager: managerId });
     if (existingManagerAssignment) {
       return res.status(400).json({ error: "This manager is already assigned to another branch" });
     }
-
-    // Create and save the new branch
     const newBranch = new BranchModel({
       branchName,
       location,
@@ -590,12 +540,12 @@ app.post("/addbranch", async (req, res) => {
     res.status(500).json({ error: "Error creating branch", details: err.message });
   }
 });
-// PUT - Update a branch by ID
+
+
 app.put("/branches/:id", async (req, res) => {
   const { id } = req.params;
 let updateData = req.body;
 
-// If managerId is sent, rename it to `manager`
 if (updateData.managerId) {
   updateData.manager = updateData.managerId;
   delete updateData.managerId;
@@ -624,7 +574,7 @@ if (updateData.managerId) {
   }
 });
 
-// DELETE - Delete a branch by ID
+
 app.delete("/branches/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -647,7 +597,7 @@ app.delete("/branches/:id", async (req, res) => {
   }
 });
 
-// Assign Branch Manager
+
 app.put("/assignmanager/:branchId", async (req, res) => {
   const { managerId } = req.body;
 
@@ -669,7 +619,7 @@ app.put("/assignmanager/:branchId", async (req, res) => {
   }
 });
 
-// Get Branches
+
 app.get("/branch-by-manager/:managerId", async (req, res) => {
   const { managerId } = req.params;
 
@@ -695,7 +645,6 @@ app.get("/branches", async (req, res) => {
 
 app.get("/api/stats", async (req, res) => {
   try {
-    // Fetch all stats in parallel
     const [
       totalUsers,
       totalAdmins,
@@ -707,13 +656,10 @@ app.get("/api/stats", async (req, res) => {
       EmployeeModel.countDocuments({ role: "admin" }),
       EmployeeModel.countDocuments({ role: "manager" }),
       BranchModel.countDocuments(),
-       ReportModel.countDocuments(), // Optional: if you have a ReportModel
+       ReportModel.countDocuments(), 
     ]);
 
-    // Calculate Total Employees as Admins + Managers
     const totalEmployees = totalAdmins + totalManagers;
-
-    // Send back aggregated statistics
     res.json({
       totalUsers,
       totalEmployees,
@@ -726,7 +672,7 @@ app.get("/api/stats", async (req, res) => {
   }
 });
 
-// /api/user-breakdown
+
 app.get("/api/user-breakdown", async (req, res) => {
   try {
     const breakdown = await EmployeeModel.aggregate([
@@ -749,17 +695,15 @@ app.get("/api/user-breakdown", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch breakdown" });
   }
 });
-// Add to your backend routes
+
+
 app.get("/api/revenue-stats", async (req, res) => {
   try {
-    // Get current year
     const currentYear = new Date().getFullYear();
-    
-    // Aggregate monthly revenue data
-    const monthlyRevenue = await OrderModel.aggregate([
+        const monthlyRevenue = await OrderModel.aggregate([
       {
         $match: {
-          status: "Confirmed", // Only confirmed orders
+          status: "Confirmed", 
           dateOrdered: {
             $gte: new Date(`${currentYear}-01-01`),
             $lte: new Date(`${currentYear}-12-31`)
@@ -784,7 +728,6 @@ app.get("/api/revenue-stats", async (req, res) => {
       }
     ]);
 
-    // Format month names
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     
@@ -792,8 +735,6 @@ app.get("/api/revenue-stats", async (req, res) => {
       month: monthNames[item.month - 1],
       revenue: item.revenue
     }));
-
-    // Fill in missing months with 0 revenue
     const completeRevenue = monthNames.map((month, index) => {
       const found = formattedRevenue.find(item => item.month === month);
       return found || { month, revenue: 0 };
@@ -805,6 +746,7 @@ app.get("/api/revenue-stats", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch revenue stats" });
   }
 });
+
 
 app.get("/api/admin/reports", async (req, res) => {
   try {
@@ -822,8 +764,7 @@ app.get("/api/admin/reports", async (req, res) => {
 });
 
 
-// Endpoint to fetch branch manager stats
-// Get manager-specific stats
+
 app.get('/api/manager/stats', async (req, res) => {
   try {
     const { managerId } = req.query;
@@ -832,85 +773,31 @@ app.get('/api/manager/stats', async (req, res) => {
       return res.status(400).json({ error: 'Manager ID is required' });
     }
 
-    // Get current date ranges
     const today = new Date();
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const startOfYear = new Date(today.getFullYear(), 0, 1);
 
-    // Get manager's branch
     const branch = await BranchModel.findOne({ manager: managerId });
     if (!branch) {
       return res.status(404).json({ error: 'Branch not found for this manager' });
     }
 
-    // Run all queries in parallel
     const [
       totalOrders,
-      totalRevenue,
-      popularProduct,
       totalReports,
-      monthlyEarnings,
-      salesBreakdown
+      monthlyEarnings
     ] = await Promise.all([
-      // Total orders this month
       OrderModel.countDocuments({
         branchId: branch._id,
         status: 'Confirmed',
         dateOrdered: { $gte: startOfMonth }
       }),
 
-      // Total revenue this month
-      OrderModel.aggregate([
-        {
-          $match: {
-            branchId: branch._id,
-            status: 'Confirmed',
-            dateOrdered: { $gte: startOfMonth }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            total: { $sum: '$totalPrice' }
-          }
-        }
-      ]),
-
-      // Most popular product
-      OrderModel.aggregate([
-        {
-          $match: {
-            branchId: branch._id,
-            status: 'Confirmed',
-            dateOrdered: { $gte: startOfYear }
-          }
-        },
-        {
-          $group: {
-            _id: '$product',
-            count: { $sum: 1 }
-          }
-        },
-        { $sort: { count: -1 } },
-        { $limit: 1 },
-        {
-          $lookup: {
-            from: 'products',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'product'
-          }
-        },
-        { $unwind: '$product' }
-      ]),
-
-      // Total reports submitted
       ReportModel.countDocuments({
         branchManagerId: managerId,
         sentToAdmin: true
       }),
 
-      // Monthly earnings for the year
       OrderModel.aggregate([
         {
           $match: {
@@ -926,44 +813,17 @@ app.get('/api/manager/stats', async (req, res) => {
           }
         },
         { $sort: { '_id': 1 } }
-      ]),
-
-      // Sales breakdown by type
-      OrderModel.aggregate([
-        {
-          $match: {
-            branchId: branch._id,
-            status: 'Confirmed',
-            dateOrdered: { $gte: startOfYear }
-          }
-        },
-        {
-          $group: {
-            _id: '$salesType',
-            value: { $sum: '$totalPrice' }
-          }
-        }
       ])
     ]);
 
-    // Format response
     res.json({
       stats: {
         orders: totalOrders,
-        revenue: totalRevenue[0]?.total || 0,
-        popularProduct: popularProduct[0]?.product?.name || 'N/A',
-        popularProductCount: popularProduct[0]?.count || 0,
         reports: totalReports
       },
       monthlyEarnings: monthlyEarnings.map(item => ({
         month: item._id,
-        earnings: item.earnings
-      })),
-      salesBreakdown: salesBreakdown.map(item => ({
-        name: item._id || 'Direct',
-        value: item.value,
-        color: item._id === 'referral' ? '#fbb6ce' : 
-               item._id === 'affiliate' ? '#fcd34d' : '#90cdf4'
+        earnings: item.earnings || 0
       }))
     });
 
@@ -974,11 +834,11 @@ app.get('/api/manager/stats', async (req, res) => {
 });
 
 
+
+
 app.get("/api/branch-manager/sales-breakdown", async (req, res) => {
   try {
     const branchManagerId = req.user._id;
-
-    // Fetch sales breakdown by category
     const salesBreakdown = await OrderModel.aggregate([
       {
         $match: { branchManagerId },
@@ -1017,19 +877,18 @@ app.get("/api/branch-manager/sales-breakdown", async (req, res) => {
   }
 });
 
+
 app.get("/api/branch-manager/net-income", async (req, res) => {
   try {
     const branchManagerId = req.user._id;
-
-    // Aggregate net income by month
     const netIncome = await OrderModel.aggregate([
       {
         $match: { branchManagerId },
       },
       {
         $group: {
-          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } }, // Group by month
-          earnings: { $sum: "$totalAmount" }, // Sum of all order amounts
+          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } }, 
+          earnings: { $sum: "$totalAmount" }, 
         },
       },
       {
@@ -1048,53 +907,7 @@ app.get("/api/branch-manager/net-income", async (req, res) => {
   }
 });
 
-app.get("/api/branch-manager/earning-by-location", async (req, res) => {
-  try {
-    const branchManagerId = req.user._id;
 
-    // Aggregate earnings by location
-    const earningsByLocation = await OrderModel.aggregate([
-      {
-        $match: { branchManagerId },
-      },
-      {
-        $group: {
-          _id: "$location", // Assuming each order has a `location` field
-          totalEarnings: { $sum: "$totalAmount" },
-        },
-      },
-      {
-        $project: {
-          country: "$_id",
-          value: "$totalEarnings",
-          _id: 0,
-        },
-      },
-    ]);
-
-    res.json(earningsByLocation);
-  } catch (err) {
-    console.error("Error fetching earnings by location:", err);
-    res.status(500).json({ error: "Failed to fetch earnings by location" });
-  }
-});
-app.get("/api/branch-manager/recent-activity", async (req, res) => {
-  try {
-    const branchManagerId = req.user._id;
-
-    // Fetch recent activity (e.g., orders or updates)
-    const recentActivity = await ActivityModel.find({ branchManagerId })
-      .sort({ createdAt: -1 }) // Sort by most recent
-      .limit(5); // Limit to 5 recent activities
-
-    res.json(recentActivity);
-  } catch (err) {
-    console.error("Error fetching recent activity:", err);
-    res.status(500).json({ error: "Failed to fetch recent activity" });
-  }
-});
-
-// Add this route to check code uniqueness
 app.get('/check-code', async (req, res) => {
   try {
     const { code, branchManagerId } = req.query;
@@ -1115,17 +928,13 @@ app.get('/check-code', async (req, res) => {
   }
 });
 
-// Existing category route
+
 app.post('/category', async (req, res) => {
   try {
     const { code, description, category, branchManagerId } = req.body;
-
-    // Validate branchManagerId
     if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
       return res.status(400).json({ error: 'Invalid or missing branch manager ID.' });
     }
-
-    // Check if code already exists (double check)
     const existingCategory = await CategoryModel.findOne({ 
       code,
       branchManagerId 
@@ -1134,13 +943,9 @@ app.post('/category', async (req, res) => {
     if (existingCategory) {
       return res.status(400).json({ error: 'This code already exists' });
     }
-
-    // Validate category name
     if (/^\d+$/.test(category)) {
       return res.status(400).json({ error: 'Category cannot be only numbers' });
     }
-
-    // Create a new category document
     const newCategory = new CategoryModel({
       code,
       description,
@@ -1148,7 +953,6 @@ app.post('/category', async (req, res) => {
       branchManagerId,
     });
 
-    // Save the category to the database
     await newCategory.save();
 
     res.status(201).json({ message: 'Category registered successfully.' });
@@ -1158,17 +962,14 @@ app.post('/category', async (req, res) => {
   }
 });
 
-// Route to fetch all categories
+
 app.get('/categories', async (req, res) => {
   try {
     const { branchManagerId } = req.query;
 
-    // Validate branchManagerId
     if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
       return res.status(400).json({ error: 'Invalid or missing branch manager ID.' });
     }
-
-    // Fetch categories for the specified branch manager
     const categories = await CategoryModel.find({ branchManagerId });
 
     res.status(200).json(categories);
@@ -1177,20 +978,15 @@ app.get('/categories', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-// Register Product Route
+
+
 app.post("/addproduct", authenticateToken, upload.single("image"), async (req, res) => {
   try {
     const { name, purchaseprice, saleprice, description, category } = req.body;
-
-    // Extract branchManagerId from the authenticated user
     const branchManagerId = req.user._id;
-
-    // Check if a file was uploaded
     if (!req.file) {
       return res.status(400).json({ message: "Image is required." });
     }
-
-    // Generate a relative path for the image
     const imagePath = `/uploads/${req.file.filename}`;
 
     if (!name || !purchaseprice || !saleprice || !category) {
@@ -1215,7 +1011,7 @@ app.post("/addproduct", authenticateToken, upload.single("image"), async (req, r
       saleprice: salePrice,
       description,
       category: categoryExists._id,
-      branchManagerId, // Include the branchManagerId here
+      branchManagerId, 
       image: imagePath,
     });
 
@@ -1243,8 +1039,6 @@ app.post("/buyproduct", async (req, res) => {
     if (!product) {
       return res.status(404).json({ error: "Product not found." });
     }
-
-    // Update the product's stock quantity
     product.quantity += parsedQuantity;
     await product.save();
 
@@ -1255,18 +1049,14 @@ app.post("/buyproduct", async (req, res) => {
   }
 });
 
-// Endpoint to get all products, aggregated by category and filtered by branch manager
 app.get("/productlist", async (req, res) => {
   const { search, branchManagerId } = req.query;
-
-  // Validate branchManagerId
   if (!branchManagerId || !mongoose.Types.ObjectId.isValid(branchManagerId)) {
     console.error("Invalid or missing branch manager ID:", branchManagerId);
     return res.status(400).json({ message: "Invalid or missing branch manager ID." });
   }
 
   try {
-    // Convert branchManagerId to ObjectId
     const objectIdBranchManagerId = new mongoose.Types.ObjectId(branchManagerId);
     const products = await ProductModel.aggregate([
       {
@@ -1292,29 +1082,27 @@ app.get("/productlist", async (req, res) => {
               description: "$description",
               quantityType: "$quantityType",
               status: "$status",
-              image: "$image", // Include the image path
+              image: "$image", 
             }
           }
         }
       }
     ]);
-
-    // Precompute stock alerts
     const stockAlerts = products.flatMap(group =>
       group.products.filter(product => product.status === "Low Stock" || product.status === "Out Of Stock")
     );
 
     res.json({
       products,
-      stockAlerts: stockAlerts.length > 0 ? stockAlerts : null // Include stock alerts in the response
+      stockAlerts: stockAlerts.length > 0 ? stockAlerts : null 
     });
   } catch (err) {
-    console.error("Error fetching products:", err); // Log the error
+    console.error("Error fetching products:", err); 
     res.status(500).json({ message: "Error fetching products." });
   }
 });
 
-// Update product information
+
 app.put("/updateproduct/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -1326,10 +1114,8 @@ app.put("/updateproduct/:id", async (req, res) => {
       quantity,
       description,
       status,
-      category // Ensure category is included if needed
+      category 
     } = req.body;
-
-    // Find and update the product
     const updatedProduct = await ProductModel.findByIdAndUpdate(
       id,
       {
@@ -1339,8 +1125,8 @@ app.put("/updateproduct/:id", async (req, res) => {
         saleprice,
         quantity,
         description,
-        status, // Update status based on quantity
-        category // Include category in the update if needed
+        status, 
+        category 
       },
       { new: true }
     );
@@ -1355,19 +1141,15 @@ app.put("/updateproduct/:id", async (req, res) => {
   }
 });
 
-// DELETE product  by ID
+
 app.delete('/deleteproduct/:id', async (req, res) => {
   try {
     const productId = req.params.id;
-
-    // Check if the product  exists before deleting
     const product = await ProductModel.findById(productId);
 
     if (!product ) {
       return res.status(404).json({ message: 'Product  not found' });
     }
-
-    // Delete the product 
     await ProductModel.findByIdAndDelete(productId);
 
     return res.status(200).json({ message: 'Product deleted successfully' });
@@ -1375,6 +1157,7 @@ app.delete('/deleteproduct/:id', async (req, res) => {
     return res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
 
 app.post("/sellproduct", async (req, res) => {
   const { productId, quantity, totalPrice, branchManagerId } = req.body;
@@ -1405,14 +1188,8 @@ app.post("/sellproduct", async (req, res) => {
         error: `Insufficient stock. Only ${product.quantity} units are available.`,
       });
     }
-
-    // Calculate cost price
     const costPrice = product.purchaseprice * quantity;
-
-    // Decrement asset quantity
     product.quantity -= quantity;
-
-    // Update product status based on remaining quantity
     if (product.quantity === 0) {
       product.status = 'Out Of Stock';
     } else if (product.quantity <= 5) {
@@ -1444,7 +1221,7 @@ app.post("/sellproduct", async (req, res) => {
   }
 });
 
-// Endpoint to get all sold products
+
 app.get("/assigned-products", async (req, res) => {
   const { branchManagerId } = req.query;
 
@@ -1464,7 +1241,8 @@ app.get("/assigned-products", async (req, res) => {
   }
 });
 
-// In your backend route (e.g., routes/reports.js)
+
+
 app.post('/reports', async (req, res) => {
   const { startDate, endDate, branchManagerId } = req.body;
 
@@ -1473,7 +1251,6 @@ app.post('/reports', async (req, res) => {
   }
 
   try {
-    // Convert to start and end of day in local timezone
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
     
@@ -1481,18 +1258,14 @@ app.post('/reports', async (req, res) => {
     end.setHours(23, 59, 59, 999);
 
     console.log(`Querying between: ${start} and ${end}`);
-
-    // Find orders - remove status filter temporarily for debugging
     const orders = await OrderModel.find({
       dateOrdered: { $gte: start, $lte: end },
       branchManagerId: branchManagerId,
-      // status: "Confirmed", // Removed for debugging
     }).populate('product').lean();
 
     console.log(`Found ${orders.length} orders`);
     console.log('Sample order:', orders.length > 0 ? orders[0] : null);
 
-    // Find assignments
     const assignments = await AssignmentModel.find({
       dateAssigned: { $gte: start, $lte: end },
       branchManagerId: branchManagerId,
@@ -1500,8 +1273,6 @@ app.post('/reports', async (req, res) => {
 
     console.log(`Found ${assignments.length} assignments`);
     console.log('Sample assignment:', assignments.length > 0 ? assignments[0] : null);
-
-    // Process data
     const reportData = [
       ...orders.map(order => ({
         product: order.product?._id,
@@ -1546,7 +1317,6 @@ app.post('/reports', async (req, res) => {
       });
     }
 
-    // Calculate totals
     const totalSales = reportData.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
     const costPrice = reportData.reduce(
       (sum, item) => sum + ((item.purchasePrice || 0) * (item.quantity || 0)), 
@@ -1576,7 +1346,7 @@ app.post('/reports', async (req, res) => {
   }
 });
 
-// Endpoint to get all reports
+
 app.get('/reports', async (req, res) => {
   const { branchManagerId } = req.query;
 
@@ -1587,15 +1357,12 @@ app.get('/reports', async (req, res) => {
   try {
     const reports = await ReportModel.find({ branchManagerId })
       .sort({ createdAt: -1 })
-      .lean(); // Use lean() for better performance
-    
-    // Ensure dates are properly formatted
-    const formattedReports = reports.map(report => ({
+      .lean(); 
+        const formattedReports = reports.map(report => ({
       ...report,
       reportData: report.reportData.map(item => ({
         ...item,
         date: item.date ? new Date(item.date).toISOString() : null,
-        // For frontend display, you might want to add:
         formattedDate: item.date ? new Date(item.date).toLocaleDateString() : 'N/A'
       }))
     }));
@@ -1609,7 +1376,8 @@ app.get('/reports', async (req, res) => {
     });
   }
 });
-// Get only reports that have been sent to admin
+
+
 app.get('/admin/reports', async (req, res) => {
   try {
     const reports = await ReportModel.find({ sentToAdmin: true })
@@ -1621,8 +1389,8 @@ app.get('/admin/reports', async (req, res) => {
   }
 });
 
-// Endpoint for branch managers to send reports to admin
-// Update the send-to-admin endpoint
+
+
 app.post('/reports/:id/send-to-admin', async (req, res) => {
   try {
     const report = await ReportModel.findByIdAndUpdate(
@@ -1630,7 +1398,7 @@ app.post('/reports/:id/send-to-admin', async (req, res) => {
       { 
         sentToAdmin: true,
         sentAt: new Date(),
-        status: 'submitted' // If you're using status tracking
+        status: 'submitted'
       },
       { new: true }
     ).populate('branchManagerId', 'name email');
@@ -1638,9 +1406,6 @@ app.post('/reports/:id/send-to-admin', async (req, res) => {
     if (!report) {
       return res.status(404).json({ error: 'Report not found' });
     }
-
-    // Optional: Send notification to admin
-    // notificationService.notifyAdmin(report);
 
     res.json({ 
       success: true,
@@ -1650,7 +1415,8 @@ app.post('/reports/:id/send-to-admin', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// Add to your admin API
+
+
 app.post('/admin/reports/:id/comment', async (req, res) => {
   const { comment } = req.body;
   await ReportModel.findByIdAndUpdate(
@@ -1661,12 +1427,10 @@ app.post('/admin/reports/:id/comment', async (req, res) => {
 });
 
 
-// Endpoint to create an order
+
 app.post('/orders', async (req, res) => {
   try {
     const { product, quantity, totalPrice, userId, branchManagerId, branchId, tx_ref } = req.body;
-
-    // Validate all required fields
     const requiredFields = ['product', 'quantity', 'totalPrice', 'userId', 'branchManagerId', 'branchId', 'tx_ref'];
     const missingFields = requiredFields.filter(field => !req.body[field]);
     
@@ -1676,8 +1440,6 @@ app.post('/orders', async (req, res) => {
         missingFields
       });
     }
-
-    // More comprehensive duplicate check
     const existingOrder = await OrderModel.findOne({
       $or: [
         { tx_ref },
@@ -1696,8 +1458,6 @@ app.post('/orders', async (req, res) => {
         existingOrderId: existingOrder._id
       });
     }
-
-    // Create the order with additional validation
     const order = new OrderModel({
       product,
       quantity,
@@ -1712,8 +1472,6 @@ app.post('/orders', async (req, res) => {
     });
 
     await order.save();
-
-    // Populate and return the order
     const populatedOrder = await OrderModel.findById(order._id)
       .populate('product')
       .populate('userId', 'name address phone')
@@ -1729,18 +1487,17 @@ app.post('/orders', async (req, res) => {
     });
   }
 });
-// Endpoint to get all orders
+
+
 app.get("/orders", (req, res) => {
   const { userId } = req.query;
 
   if (!userId) {
     return res.status(400).json({ error: "User ID is required" });
   }
-
-  // Fetch orders belonging to the logged-in user
   OrderModel.find({ userId: userId })
-    .populate('product') // Populate product details
-    .populate('userId', 'name address phone') // Populate user details: name, address, and phone
+    .populate('product') 
+    .populate('userId', 'name address phone') 
     .then(orders => {
       res.json(orders);
     })
@@ -1749,8 +1506,8 @@ app.get("/orders", (req, res) => {
     });
 });
 
-// Get all orders for a branch manager
-// GET /admin/orders
+
+
 app.get("/admin/orders", async (req, res) => {
   const { branchManagerId } = req.query;
 
@@ -1759,24 +1516,18 @@ app.get("/admin/orders", async (req, res) => {
   }
 
   try {
-    // Find all branches managed by the branch manager
     const branches = await BranchModel.find({ manager: branchManagerId });
-
-    // Extract branch IDs
     const branchIds = branches.map(branch => branch._id);
 
     if (branchIds.length === 0) {
       return res.status(404).json({ error: "No branches found for this branch manager" });
     }
-
-    // Find all orders where the branchId matches one of the branch manager's branches
     const orders = await OrderModel.find({ branchId: { $in: branchIds } })
       .populate("userId", "name address phone")
       .populate("product");
 
-    // Return an empty array if no orders are found
     if (orders.length === 0) {
-      return res.status(200).json([]); // Return an empty array with a 200 status
+      return res.status(200).json([]); 
     }
 
     res.json(orders);
@@ -1786,19 +1537,16 @@ app.get("/admin/orders", async (req, res) => {
   }
 });
 
-// Confirm an order
-// Confirm an order
+
 app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    // Find the order and populate the product details
     const order = await OrderModel.findById(orderId).populate('product');
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // Prevent confirming already processed orders
     if (order.status === 'Confirmed') {
       return res.status(400).json({ error: "Order is already confirmed" });
     }
@@ -1810,7 +1558,6 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
       return res.status(400).json({ error: "Product not found for this order" });
     }
 
-    // Check if there is sufficient stock
     if (order.product.quantity < order.quantity) {
       return res.status(400).json({ 
         error: "Insufficient stock",
@@ -1821,7 +1568,6 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
       });
     }
 
-    // Reduce the product stock
     order.product.quantity -= order.quantity;
     order.product.status =
       order.product.quantity === 0
@@ -1830,15 +1576,10 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
         ? 'Low Stock'
         : 'Available';
 
-    // Save the updated product
     await order.product.save();
-
-    // Confirm the order
     order.status = 'Confirmed';
-    order.confirmedAt = new Date(); // Track when it was confirmed
+    order.confirmedAt = new Date(); 
     await order.save();
-
-    // Fetch the updated order with populated fields
     const updatedOrder = await OrderModel.findById(order._id)
       .populate('userId', 'name address phone')
       .populate('product');
@@ -1854,22 +1595,19 @@ app.patch('/admin/orders/:orderId/confirm', async (req, res) => {
   }
 });
 
+
 app.patch('/admin/orders/:orderId/reject', async (req, res) => {
   try {
     const { orderId } = req.params;
-
-    // Find the order and populate the product details
     const order = await OrderModel.findById(orderId).populate('product');
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // Prevent rejecting already processed orders
     if (order.status === 'Rejected') {
       return res.status(400).json({ error: "Order is already rejected" });
     }
 
-    // If the order was confirmed, restore the product stock
     if (order.status === 'Confirmed') {
       order.product.quantity += order.quantity;
       order.product.status =
@@ -1879,16 +1617,11 @@ app.patch('/admin/orders/:orderId/reject', async (req, res) => {
           ? 'Low Stock'
           : 'Available';
 
-      // Save the updated product
       await order.product.save();
     }
-
-    // Update the order status to "Rejected"
     order.status = 'Rejected';
-    order.rejectedAt = new Date(); // Track when it was rejected
+    order.rejectedAt = new Date(); 
     await order.save();
-
-    // Fetch the updated order with populated fields
     const updatedOrder = await OrderModel.findById(order._id)
       .populate('userId', 'name address phone')
       .populate('product');
@@ -1905,16 +1638,16 @@ app.patch('/admin/orders/:orderId/reject', async (req, res) => {
 });
 
 
-// In your Express server (e.g., index.js or server.js)
+
 app.get('/current_user', (req, res) => {
   if (!req.session.user) {
     return res.status(401).json({ error: "Not logged in" });
   }
 
-  res.json(req.session.user); // Includes _id, role, etc.
+  res.json(req.session.user); 
 });
 
-// Endpoint to reset password
+
 app.post("/resetpassword", async (req, res) => {
   const { name, newPassword } = req.body;
 
@@ -1931,16 +1664,12 @@ app.post("/resetpassword", async (req, res) => {
   }
 
   try {
-    const user = await EmployeeModel.findOne({ name: name }); // Searching by name now
+    const user = await EmployeeModel.findOne({ name: name }); 
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-
-    // Hash the new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update the password
     user.password = hashedPassword;
     await user.save();
 
@@ -1950,6 +1679,7 @@ app.post("/resetpassword", async (req, res) => {
     res.status(500).json({ message: "An error occurred while resetting the password." });
   }
 });
+
 
 app.post('/validate-security', async (req, res) => {
   const { name, securityQuestion, securityAnswer } = req.body;
@@ -1976,11 +1706,11 @@ app.post('/validate-security', async (req, res) => {
   }
 });
 
-// Route to get the security question for a user by email
+
 app.get('/security-question', async (req, res) => {
   const { userId } = req.query;
 
-  console.log("Received request for userId:", userId); // Add this
+  console.log("Received request for userId:", userId); 
 
   if (!userId) {
     console.log("No userId provided");
@@ -2000,21 +1730,22 @@ app.get('/security-question', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    console.log("Found user:", user); // Add this
+    console.log("Found user:", user); 
     res.json({
       securityQuestion: user.securityQuestion || 'No security question set',
       securityAnswer: user.securityAnswer || '',
-      role: user.role // Return role for debugging
+      role: user.role 
     });
   } catch (error) {
     console.error('Database error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+
 app.post('/update-security-question', async (req, res) => {
   const { userId, newSecurityQuestion, newSecurityAnswer } = req.body;
 
-  // Validate input
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
     return res.status(400).json({ error: 'Invalid user ID' });
   }
@@ -2024,14 +1755,12 @@ app.post('/update-security-question', async (req, res) => {
   }
 
   try {
-    // Find user in EmployeeModel regardless of role
     const user = await EmployeeModel.findById(userId);
     
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Update security fields
     user.securityQuestion = newSecurityQuestion;
     user.securityAnswer = newSecurityAnswer;
     await user.save();
@@ -2048,7 +1777,8 @@ app.post('/update-security-question', async (req, res) => {
     });
   }
 });
-// Route to reset the password
+
+
 app.post('/reset-password', async (req, res) => {
   const { name, securityAnswer, newPassword } = req.body;
 

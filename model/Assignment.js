@@ -3,18 +3,18 @@ const mongoose = require("mongoose");
 const AssignmentSchema = new mongoose.Schema({
   product: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product', // Reference to the Product model
+    ref: 'Product', 
     required: true,
   },
   quantity: {
     type: Number,
     required: true,
-    min: 1, // Ensure quantity is at least 1
+    min: 1, 
   },
   totalPrice: {
     type: Number,
     required: true,
-    min: 0.01, // Ensure totalPrice is positive
+    min: 0.01, 
   },
   costPrice: { 
     type: Number,
@@ -25,12 +25,12 @@ const AssignmentSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['Available', 'Low Stock', 'Out Of Stock'], // Only allow these values
+    enum: ['Available', 'Low Stock', 'Out Of Stock'], 
   },
   branchManagerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Employee', // Reference to the BranchManager model (if applicable)
-    required: true, // Ensure every assignment is linked to a branch manager
+    ref: 'Employee',
+    required: true, 
   },
 }, { timestamps: true });
 

@@ -8,7 +8,7 @@ const CategorySchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Employee', 
     required: true 
-  }, // Link to the branch manager who created the category
+  }, 
 }, { timestamps: true });
 
 const CategoryModel = mongoose.model("Category", CategorySchema);

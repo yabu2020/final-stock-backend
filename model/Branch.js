@@ -7,8 +7,8 @@ const BranchSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Employee",
     required: false,
-    unique: true, // Ensure one manager per branch
-    sparse: true, // Allow null values for branches without managers
+    unique: true, 
+    sparse: true, 
   },
 });
 

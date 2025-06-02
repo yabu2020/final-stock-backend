@@ -7,7 +7,9 @@ const EmployeeSchema = new mongoose.Schema({
   phone: { type: String, required: true, unique: true, trim: true, lowercase: true },
   password: { type: String, required: false },
   address: { type: String, required: false },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false }, // Link to user account
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false }, 
+  securityQuestion: { type: String, required: false }, 
+  securityAnswer: { type: String, required: false }, 
 });
 
 const EmployeeModel = mongoose.model("Employee", EmployeeSchema);
