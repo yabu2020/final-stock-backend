@@ -27,7 +27,7 @@ const normalizename = (name) => name.trim().toLowerCase();
 
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:5173',  
+  origin: 'https://stock-managment-kappa.vercel.app/',  
   credentials: true,                
 }));
 app.use(bodyParser.json());
